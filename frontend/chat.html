@@ -1,0 +1,215 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Iron Ore CRM Chatbot</title>
+    <style>
+        * { box-sizing: border-box; margin: 0; padding: 0; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .chat-container {
+            width: 100%;
+            max-width: 450px;
+            height: 600px;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+        }
+        .chat-header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 20px;
+            text-align: center;
+        }
+        .chat-header h2 { margin-bottom: 5px; }
+        .chat-header p { opacity: 0.8; font-size: 13px; }
+        .chat-messages {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .message {
+            max-width: 80%;
+            padding: 12px 16px;
+            border-radius: 16px;
+            font-size: 14px;
+            line-height: 1.5;
+        }
+        .message.user {
+            align-self: flex-end;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-bottom-right-radius: 4px;
+        }
+        .message.bot {
+            align-self: flex-start;
+            background: #f1f5f9;
+            color: #1e293b;
+            border-bottom-left-radius: 4px;
+        }
+        .chat-input-area {
+            padding: 16px 20px;
+            border-top: 1px solid #e2e8f0;
+            display: flex;
+            gap: 10px;
+        }
+        .chat-input {
+            flex: 1;
+            padding: 12px 16px;
+            border: 2px solid #e2e8f0;
+            border-radius: 24px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s;
+        }
+        .chat-input:focus { border-color: #667eea; }
+        .send-btn {
+            width: 44px;
+            height: 44px;
+            border-radius: 50%;
+            border: none;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            cursor: pointer;
+            font-size: 18px;
+            transition: transform 0.2s;
+        }
+        .send-btn:hover { transform: scale(1.05); }
+        .send-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+        .quick-actions {
+            padding: 0 20px 12px;
+            display: flex;
+            flex-wrap: wrap;
+            gap: 8px;
+        }
+        .quick-btn {
+            padding: 8px 14px;
+            border: 1px solid #667eea;
+            background: white;
+            color: #667eea;
+            border-radius: 20px;
+            font-size: 12px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .quick-btn:hover { background: #667eea; color: white; }
+        .loading { opacity: 0.6; font-style: italic; }
+    </style>
+</head>
+<body>
+    <div class="chat-container">
+        <div class="chat-header">
+            <h2>🤖 CRM Bot</h2>
+            <p>Ask about iron ore, pellets, specifications, or products</p>
+        </div>
+        <div class="chat-messages" id="messages"></div>
+        <div class="quick-actions" id="quickActions"></div>
+        <div class="chat-input-area">
+            <input type="text" class="chat-input" id="input" placeholder="Type your message..." />
+            <button class="send-btn" id="sendBtn">➤</button>
+        </div>
+    </div>
+
+    <script>
+        const API_BASE = 'http://localhost:8000';
+        const messagesDiv = document.getElementById('messages');
+        const input = document.getElementById('input');
+        const sendBtn = document.getElementById('sendBtn');
+        const quickActions = document.getElementById('quickActions');
+
+        let token = null;
+        let user = null;
+
+        // Quick action buttons
+        const quickPrompts = [
+            'Show products',
+            'Iron ore specs',
+            'Iron pellet specs',
+            'My details'
+        ];
+
+        async function login() {
+            try {
+                const res = await fetch(`${API_BASE}/api/auth/login`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ user_id: 'shashi', password: 'shashi@1234' })
+                });
+                const data = await res.json();
+                if (data.access_token) {
+                    token = data.access_token;
+                    user = data.user;
+                    addMessage('Hello! I\'m connected to MS SQL Server. How can I help you today?', 'bot');
+                    showQuickActions();
+                }
+            } catch (err) {
+                addMessage('⚠️ Unable to connect to server. Make sure backend is running on port 8000.', 'bot');
+            }
+        }
+
+        function showQuickActions() {
+            quickActions.innerHTML = quickPrompts.map(p =>
+                `<button class="quick-btn" onclick="sendQuick('${p}')">${p}</button>`
+            ).join('');
+        }
+
+        function sendQuick(text) {
+            input.value = text;
+            sendMessage();
+        }
+
+        function addMessage(text, type) {
+            const div = document.createElement('div');
+            div.className = `message ${type}`;
+            div.textContent = text;
+            messagesDiv.appendChild(div);
+            messagesDiv.scrollTop = messagesDiv.scrollHeight;
+        }
+
+        async function sendMessage() {
+            const text = input.value.trim();
+            if (!text) return;
+
+            addMessage(text, 'user');
+            input.value = '';
+            sendBtn.disabled = true;
+
+            try {
+                const res = await fetch(`${API_BASE}/api/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': `Bearer ${token}`
+                    },
+                    body: JSON.stringify({ message: text })
+                });
+                const data = await res.json();
+                addMessage(data.response || 'No response', 'bot');
+            } catch (err) {
+                addMessage('⚠️ Error: ' + err.message, 'bot');
+            }
+
+            sendBtn.disabled = false;
+        }
+
+        sendBtn.onclick = sendMessage;
+        input.onkeypress = (e) => { if (e.key === 'Enter') sendMessage(); };
+
+        // Auto-connect on load
+        login();
+    </script>
+</body>
+</html>

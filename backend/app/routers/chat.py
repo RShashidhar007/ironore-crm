@@ -1,0 +1,1025 @@
+import re
+from datetime import datetime
+from typing import Optional
+
+from fastapi import APIRouter, Depends
+from sqlalchemy.orm import Session
+from sqlalchemy import or_
+
+from ..database import get_db
+from ..models import (
+    CustomerDetail,
+    ProductMaster,
+    ProductCategoryMaster,
+    IronOreSpecificationMaster,
+    IronPelletSpecificationMaster,
+    ComplaintMaster,
+    LoginMaster,
+)
+from ..schemas import ChatRequest, ChatResponse, ComplaintIn, ComplaintOut
+from ..auth import get_current_user
+from ..config import settings
+from .. import ollama_client
+from ..intent import (
+    Intent,
+    classify_intent,
+    extract_product_hint,
+    extract_lot_hint,
+    extract_parameter_hint,
+    extract_complaint_id,
+)
+
+router = APIRouter(prefix="/api/chat", tags=["chat"])
+
+ALL_ACTIONS = [
+    "Ask for a Quotation",
+    "Place an Order",
+    "Product Information",
+    "Raise a Complaint",
+    "Track my Complaint",
+    "Contact Company via Email",
+]
+
+# Maps the frontend's one-click action buttons straight to an intent,
+# bypassing free-text classification entirely.
+ACTION_TO_INTENT = {
+    "Ask for a Quotation": Intent.QUOTATION_REQUEST,
+    "Place an Order": Intent.ORDER_REQUEST,
+    "Product Information": Intent.PRODUCT_INFORMATION,
+    "Raise a Complaint": Intent.COMPLAINT,
+    "Track my Complaint": Intent.COMPLAINT_TRACKING,
+    "Contact Company via Email": Intent.WHATSAPP_CONTACT,
+}
+
+
+def _find_product(db: Session, hint: Optional[str]) -> Optional[ProductMaster]:
+    if not hint:
+        return None
+    hint_norm = hint.strip()
+    product = db.get(ProductMaster, hint_norm.upper())
+    if product:
+        return product
+    return (
+        db.query(ProductMaster)
+        .filter(or_(ProductMaster.PID.ilike(hint_norm), ProductMaster.ProductName.ilike(f"%{hint_norm}%")))
+        .first()
+    )
+
+
+def _get_product_category(db: Session, product: ProductMaster) -> Optional[str]:
+    """Manually look up product category by ID (ProductCategory is stored as string int)."""
+    if not product.ProductCategory:
+        return None
+    try:
+        cat_id = int(product.ProductCategory)
+        category = db.get(ProductCategoryMaster, cat_id)
+        return category.ProductCategory if category else None
+    except (ValueError, TypeError):
+        return None
+
+
+def _spec_table_markdown(rows, include_testing_standard: bool) -> str:
+    if not rows:
+        return "(no specification rows found)"
+    
+    # Build a clean, simple specification summary
+    specs = []
+    for r in rows:
+        param = (r.Parameter or "").strip()
+        spec = (r.Specification or "").strip()
+        lot_no = (getattr(r, "LotNo", None) or "").strip()
+        testing_std = (getattr(r, "TestingStandard", None) or "").strip() if include_testing_standard else ""
+        
+        if param and spec:
+            if include_testing_standard and testing_std:
+                specs.append(f"• {param}: {spec} (Testing Standard: {testing_std})")
+            elif lot_no:
+                specs.append(f"• {param}: {spec} (Lot: {lot_no})")
+            else:
+                specs.append(f"• {param}: {spec}")
+    
+    if not specs:
+        return "(no specification rows found)"
+    
+    return "Specifications:\n" + "\n".join(specs)
+
+
+def _sanitize_reply(reply: str, current_customer_cid: Optional[str], db: Session) -> str:
+    """
+    Defense-in-depth response validation: strips anything that looks
+    like it might leak SQL, credentials, or another customer's CID,
+    even though the prompt already instructs the LLM not to produce
+    these. The LLM's own output is untrusted input at this boundary.
+    """
+    if not reply:
+        return reply
+    # Strip anything that looks like a SQL statement leaking through.
+    reply = re.sub(r"(?is)\b(select|insert|update|delete)\b.*?;?", "[removed]", reply) \
+        if re.search(r"(?is)\bselect\s+.*\bfrom\b", reply) else reply
+    # Strip obvious credential-shaped strings.
+    reply = re.sub(r"(?i)(password|pwd)\s*[:=]\s*\S+", "[redacted]", reply)
+
+    # Block leakage of other customers' CIDs mentioned verbatim.
+    other_cids = [c.CID for c in db.query(CustomerDetail.CID).all()
+                  if current_customer_cid is None or c.CID != current_customer_cid]
+    for cid in other_cids:
+        if cid and cid in reply:
+            reply = reply.replace(cid, "[restricted]")
+    return reply
+
+
+@router.post("", response_model=ChatResponse)
+def chat(
+    payload: ChatRequest,
+    current_user: LoginMaster = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    message = payload.message or ""
+
+    # Check for dynamic action patterns first (view_complaint:, complaint_category:, etc.)
+    if payload.action:
+        if payload.action.startswith("view_complaint:"):
+            intent = Intent.COMPLAINT_TRACKING
+        elif payload.action in ACTION_TO_INTENT:
+            intent = ACTION_TO_INTENT[payload.action]
+        else:
+            intent = classify_intent(message)
+    else:
+        intent = classify_intent(message)
+
+    # Get user display name for notifications
+    user_display = current_user.User_Name or current_user.User_Id
+
+    # If we guessed a spec intent (or the message just names a product +
+    # "specification"), resolve the actual product and let its real
+    # category decide Ore vs Pellet — free text alone is ambiguous
+    # (e.g. "Fe specification for P003" doesn't say "pellet" or "ore").
+    if intent in (Intent.IRON_ORE_SPECIFICATION, Intent.IRON_PELLET_SPECIFICATION):
+        hint = extract_product_hint(message)
+        product = _find_product(db, hint) if hint else None
+        if product:
+            cat_name = (_get_product_category(db, product) or "").lower()
+            if "pellet" in cat_name:
+                intent = Intent.IRON_PELLET_SPECIFICATION
+            elif "ore" in cat_name:
+                intent = Intent.IRON_ORE_SPECIFICATION
+
+    verified_data = ""
+    structured_data = None
+    template_reply = None
+
+    # ---------------- CUSTOMER_INFORMATION ----------------
+    if intent == Intent.CUSTOMER_INFORMATION:
+        customer = db.get(CustomerDetail, current_user.CID) if current_user.CID else None
+        if not customer:
+            verified_data = "No customer record is linked to this account."
+            template_reply = "I couldn't find a customer record linked to your account. Please contact support."
+        else:
+            structured_data = {
+                "customerCode": customer.CustomerCode,
+                "customerName": customer.CustomerName,
+                "contactPerson": customer.ContactPerson,
+                "email": customer.Email,
+                "mobile": customer.Mobile,
+                "telephone": customer.Telephone,
+                "gstNo": customer.GSTNo,
+                "panNo": customer.PANNo,
+                "address": ", ".join(filter(None, [customer.Street1, customer.Street2,
+                                                     customer.Street3, customer.Street4,
+                                                     customer.Location, customer.City,
+                                                     customer.State, customer.PostalCode,
+                                                     customer.Country])),
+                "status": customer.Status,
+            }
+            verified_data = "\n".join(f"{k}: {v}" for k, v in structured_data.items())
+            template_reply = (
+                f"Here are your registered customer details:\n\n"
+                f"- Customer Code: {customer.CustomerCode or 'not available'}\n"
+                f"- Company: {customer.CustomerName or 'not available'}\n"
+                f"- Contact Person: {customer.ContactPerson or 'not available'}\n"
+                f"- Email: {customer.Email or 'not available'}\n"
+                f"- Mobile: {customer.Mobile or 'not available'}\n"
+                f"- GST No.: {customer.GSTNo or 'not available'}\n"
+                f"- Registered Address: {structured_data['address'] or 'not available'}"
+            )
+
+    # ---------------- PRODUCT_CATEGORY ----------------
+    elif intent == Intent.PRODUCT_CATEGORY:
+        cats = db.query(ProductCategoryMaster).filter(ProductCategoryMaster.PStatus == 1).all()
+        structured_data = [{"id": c.ProductCatID, "name": c.ProductCategory} for c in cats]
+        verified_data = "\n".join(f"{c.ProductCatID}: {c.ProductCategory}" for c in cats) or "No active categories found."
+        if cats:
+            names = ", ".join(c.ProductCategory for c in cats)
+            template_reply = f"We currently offer these active product categories: {names}."
+        else:
+            template_reply = "I couldn't find any active product categories in the current CRM database."
+
+    # ---------------- PRODUCT_INFORMATION ----------------
+    elif intent == Intent.PRODUCT_INFORMATION:
+        hint = extract_product_hint(message)
+        product = _find_product(db, hint) if hint else None
+        if product:
+            status_note = "" if product.PStatus == 1 else " This product is currently marked inactive."
+            cat_name = _get_product_category(db, product) or "unspecified category"
+            structured_data = {"PID": product.PID, "name": product.ProductName,
+                                "category": cat_name, "status": product.PStatus}
+            verified_data = f"{product.PID}: {product.ProductName}, category={cat_name}, status={product.PStatus}"
+            template_reply = f"{product.ProductName} (ID: {product.PID}) belongs to {cat_name}.{status_note}"
+        else:
+            products = db.query(ProductMaster).all()
+            structured_data = [
+                {"PID": p.PID, "name": p.ProductName,
+                 "category": _get_product_category(db, p),
+                 "status": p.PStatus}
+                for p in products
+            ]
+            verified_data = "\n".join(f"{p.PID}: {p.ProductName} ({p.PStatus})" for p in products) or "No products found."
+            if products:
+                lines = "\n".join(f"- {p.ProductName} (ID: {p.PID}){'' if p.PStatus == 1 else ' — inactive'}"
+                                   for p in products)
+                template_reply = f"Here are our available products:\n\n{lines}"
+            else:
+                template_reply = "I couldn't find any products in the current CRM database."
+
+    # ---------------- IRON_ORE_SPECIFICATION ----------------
+    elif intent == Intent.IRON_ORE_SPECIFICATION:
+        hint = extract_product_hint(message)
+        product = _find_product(db, hint) if hint else None
+        lot = extract_lot_hint(message)
+        parameter = extract_parameter_hint(message)
+
+        q = db.query(IronOreSpecificationMaster)
+        if product:
+            # Try to convert product PID to int for spec table comparison
+            try:
+                pid_int = int(product.PID)
+                q = q.filter(IronOreSpecificationMaster.PID == pid_int)
+            except (ValueError, TypeError):
+                # Product PID is not numeric, can't match
+                pass
+        if lot:
+            q = q.filter(IronOreSpecificationMaster.LotNo == lot)
+        if parameter:
+            q = q.filter(IronOreSpecificationMaster.Parameter.ilike(f"%{parameter}%"))
+        rows = q.all()
+
+        structured_data = [{"parameter": r.Parameter, "specification": r.Specification,
+                             "lotNo": r.LotNo} for r in rows]
+        table_md = _spec_table_markdown(rows, include_testing_standard=False)
+        verified_data = table_md
+        if rows:
+            product_label = f" for {product.ProductName} (ID: {product.PID})" if product else ""
+            template_reply = f"I found the Iron Ore specifications{product_label}. These define the chemical composition and quality parameters for this product:\n\n{table_md}"
+        elif product:
+            template_reply = (
+                f"I couldn't find the requested specification for {product.ProductName} "
+                f"(ID: {product.PID}) in the current CRM database."
+            )
+        else:
+            template_reply = (
+                "I couldn't find matching Iron Ore specifications. Could you tell me the "
+                "product name or ID (e.g. P001) you'd like specifications for?"
+            )
+
+    # ---------------- IRON_PELLET_SPECIFICATION ----------------
+    elif intent == Intent.IRON_PELLET_SPECIFICATION:
+        hint = extract_product_hint(message)
+        product = _find_product(db, hint) if hint else None
+        parameter = extract_parameter_hint(message)
+
+        q = db.query(IronPelletSpecificationMaster)
+        if product:
+            # Try to convert product PID to int for spec table comparison
+            try:
+                pid_int = int(product.PID)
+                q = q.filter(IronPelletSpecificationMaster.PID == pid_int)
+            except (ValueError, TypeError):
+                # Product PID is not numeric, can't match
+                pass
+        if parameter:
+            q = q.filter(IronPelletSpecificationMaster.Parameter.ilike(f"%{parameter}%"))
+        rows = q.all()
+
+        structured_data = [{"parameter": r.Parameter, "specification": r.Specification,
+                             "testingStandard": r.TestingStandard} for r in rows]
+        table_md = _spec_table_markdown(rows, include_testing_standard=True)
+        verified_data = table_md
+        if rows:
+            product_label = f" for {product.ProductName} (ID: {product.PID})" if product else ""
+            template_reply = f"I found the Iron Pellet specifications{product_label}. Here are the key quality parameters and testing standards:\n\n{table_md}"
+        elif product:
+            template_reply = (
+                f"I couldn't find the requested specification for {product.ProductName} "
+                f"(ID: {product.PID}) in the current CRM database."
+            )
+        else:
+            template_reply = (
+                "I couldn't find matching Iron Pellet specifications. Could you tell me the "
+                "product name or ID (e.g. P003) you'd like specifications for?"
+            )
+
+    # ---------------- INVENTORY_CHECK ----------------
+    elif intent == Intent.INVENTORY_CHECK:
+        hint = extract_product_hint(message)
+        product = _find_product(db, hint) if hint else None
+        if product:
+            verified_data = f"Product status for {product.PID}: {product.PStatus}. No inventory quantity table exists."
+            template_reply = (
+                f"{product.ProductName} (ID: {product.PID}) is currently marked "
+                f"'{product.PStatus}'. I can confirm the product status from the current "
+                f"database, but exact available quantity is not available in the connected "
+                f"database yet."
+            )
+        else:
+            verified_data = "No inventory quantity table exists."
+            template_reply = (
+                "I can confirm a product's active/inactive status from our database, but "
+                "current inventory quantity is not available in the connected database. "
+                "Could you tell me which product you're asking about?"
+            )
+
+    # ---------------- QUOTATION_REQUEST ----------------
+    elif intent == Intent.QUOTATION_REQUEST:
+        verified_data = "Quotation table does not exist yet."
+        
+        # Get personalized greeting
+        customer_company = None
+        if current_user.CID:
+            customer = db.query(CustomerDetail).filter(CustomerDetail.CID == current_user.CID).first()
+            if customer:
+                customer_company = customer.CustomerName
+        user_display = current_user.User_Name or current_user.User_Id
+        if customer_company:
+            personalized_greeting = f"{user_display} from {customer_company}"
+        else:
+            personalized_greeting = user_display
+        
+        # Send admin notification
+        try:
+            from . import notification
+            from app.database import SessionLocal
+            
+            db2 = SessionLocal()
+            try:
+                notification.create_alert(
+                    title="Quotation Request",
+                    message=f"Customer '{user_display}' requested a quotation.\n\n"
+                           f"Customer: {personalized_greeting}\n"
+                           f"User ID: {current_user.User_Id}",
+                    requestor_user_id=current_user.User_Id,
+                    requestor_name=user_display,
+                    db=db2
+                )
+            finally:
+                db2.close()
+        except Exception as e:
+            print(f"Failed to send notification: {e}")
+        
+        template_reply = (
+            f"Hello {user_display}, I can help you with your quotation request.\n\n"
+            f"Please share the following details so our sales team can prepare a quote:\n\n"
+            f"1. Product name or ID\n"
+            f"2. Quantity required\n"
+            f"3. Any specific specifications needed\n\n"
+            f"Our sales team will contact you shortly with a formal quotation."
+        )
+
+    # ---------------- ORDER_REQUEST ----------------
+    elif intent == Intent.ORDER_REQUEST:
+        verified_data = "Order table does not exist yet."
+        
+        # Get personalized greeting
+        customer_company = None
+        if current_user.CID:
+            customer = db.query(CustomerDetail).filter(CustomerDetail.CID == current_user.CID).first()
+            if customer:
+                customer_company = customer.CustomerName
+        user_display = current_user.User_Name or current_user.User_Id
+        if customer_company:
+            personalized_greeting = f"{user_display} from {customer_company}"
+        else:
+            personalized_greeting = user_display
+        
+        # Send admin notification
+        try:
+            from . import notification
+            from app.database import SessionLocal
+            
+            db2 = SessionLocal()
+            try:
+                notification.create_alert(
+                    title="Order Request",
+                    message=f"Customer '{user_display}' wants to place an order.\n\n"
+                           f"Customer: {personalized_greeting}\n"
+                           f"User ID: {current_user.User_Id}",
+                    requestor_user_id=current_user.User_Id,
+                    requestor_name=user_display,
+                    db=db2
+                )
+            finally:
+                db2.close()
+        except Exception as e:
+            print(f"Failed to send notification: {e}")
+        
+        template_reply = (
+            f"Hello {user_display}, I can help you with your order.\n\n"
+            f"Please share the following details so our sales team can process your order:\n\n"
+            f"1. Product name or ID\n"
+            f"2. Quantity required\n"
+            f"3. Delivery location\n"
+            f"4. Any specific requirements\n\n"
+            f"Our sales team will contact you shortly to confirm the order."
+        )
+
+    # ---------------- ORDER_TRACKING ----------------
+    elif intent == Intent.ORDER_TRACKING:
+        verified_data = "Order/Dispatch tables do not exist yet."
+        
+        # Send admin notification
+        try:
+            from . import notification
+            from app.database import SessionLocal
+            
+            db2 = SessionLocal()
+            try:
+                notification.create_alert(
+                    title="Order Tracking Request",
+                    message=f"Customer '{user_display}' wants to track their order.\n\n"
+                           f"Customer: {personalized_greeting}\n"
+                           f"User ID: {current_user.User_Id}\n\n"
+                           f"Note: Order tracking is not yet available in the database.",
+                    requestor_user_id=current_user.User_Id,
+                    requestor_name=user_display or current_user.User_Id,
+                    db=db2
+                )
+            finally:
+                db2.close()
+        except Exception as e:
+            print(f"Failed to send notification: {e}")
+        
+        template_reply = (
+            f"Hello {user_display}, I'm sorry but order tracking is not yet available in our database.\n\n"
+            f"Our admin team has been notified about your request. Please contact our sales team "
+            f"for the status of your order, or use WhatsApp at {settings.COMPANY_WHATSAPP_NUMBER} "
+            f"for faster assistance."
+        )
+
+    # ---------------- COMPLAINT_TRACKING ----------------
+    elif intent == Intent.COMPLAINT_TRACKING:
+        from ..intent import extract_complaint_id
+        
+        # Check if user clicked on a specific complaint from the list
+        if payload.action and payload.action.startswith("view_complaint:"):
+            complaint_id = payload.action.split(":", 1)[1].strip()
+        else:
+            # Try to extract complaint ID from message
+            complaint_id = extract_complaint_id(message)
+        
+        if complaint_id:
+            # Look up the complaint
+            complaint = db.query(ComplaintMaster).filter(
+                ComplaintMaster.ComplaintID == complaint_id
+            ).first()
+            
+            if complaint:
+                # Check if this complaint belongs to the current user
+                if complaint.CreatedBy != current_user.User_Id:
+                    overall_status = "Not Found"
+                    verified_data = f"Complaint {complaint_id} not found for this user"
+                    template_reply = (
+                        f"I couldn't find a complaint with ID **{complaint_id}** in your account.\n\n"
+                        f"Please verify the complaint ID and try again."
+                    )
+                else:
+                    # First check if Status is already "Resolved"
+                    if complaint.Status == "Resolved" and complaint.Solution and complaint.Solution.strip():
+                        # Status is Resolved - just show the solution with greeting
+                        overall_status = "Resolved"
+                        verified_data = f"Complaint {complaint_id} resolved"
+                        template_reply = (
+                            f"Dear {complaint.ComplaintID},\n\n"
+                            f"Thank you for reaching out to us regarding your concern. We have reviewed the information you provided and are pleased to inform you that your complaint has been resolved.\n\n"
+                            f"{complaint.Solution}"
+                        )
+                    else:
+                        # Check if ALL workflow columns have data
+                        has_root_cause = complaint.RootCauseAnalysis and complaint.RootCauseAnalysis.strip()
+                        has_root_cause_date = complaint.RootCauseAnalysisDate
+                        has_corrective_action = complaint.CorrectivePreventiveAction and complaint.CorrectivePreventiveAction.strip()
+                        has_corrective_date = complaint.CorrectivePreventiveActionDate
+                        has_marketing_review = complaint.MarketingReview and complaint.MarketingReview.strip()
+                        has_marketing_date = complaint.MarketingReviewDate
+                        has_plant_head_review = complaint.PlantHeadReview and complaint.PlantHeadReview.strip()
+                        has_plant_head_date = complaint.PlantHeadReviewDate
+                        has_hod_review = complaint.HODReview and complaint.HODReview.strip()
+                        has_hod_date = complaint.HODReviewDate
+                        
+                        # Check if ALL columns are filled
+                        all_columns_complete = (
+                            has_root_cause and has_root_cause_date and
+                            has_corrective_action and has_corrective_date and
+                            has_marketing_review and has_marketing_date and
+                            has_plant_head_review and has_plant_head_date and
+                            has_hod_review and has_hod_date
+                        )
+                        
+                        # If ALL columns have data
+                        if all_columns_complete:
+                            # Check if solution already exists in database
+                            if complaint.Solution and complaint.Solution.strip():
+                                # Solution exists - update status and show it
+                                complaint.Status = "Resolved"
+                                complaint.UpdatedDate = datetime.now()
+                                complaint.UpdatedBy = "System"
+                                db.commit()
+                                
+                                overall_status = "Resolved"
+                                verified_data = f"Complaint {complaint_id} resolved"
+                                
+                                # Show ONLY the solution from database with greeting
+                                template_reply = (
+                                    f"Dear {complaint.ComplaintID},\n\n"
+                                    f"Thank you for reaching out to us regarding your concern. We have reviewed the information you provided and are pleased to inform you that your complaint has been resolved.\n\n"
+                                    f"{complaint.Solution}"
+                                )
+                            else:
+                                # No solution yet - generate with Ollama
+                                overall_status = "Resolved"
+                                
+                                # Build comprehensive verified data for Ollama
+                                verified_data_parts = [
+                                    f"Complaint Category: {complaint.CategoryType}",
+                                    f"Customer Issue: {complaint.ComplaintDescription}",
+                                    f"\nRoot Cause Analysis: {complaint.RootCauseAnalysis}",
+                                    f"Analyzed On: {complaint.RootCauseAnalysisDate.strftime('%B %d, %Y') if complaint.RootCauseAnalysisDate else 'N/A'}",
+                                    f"\nCorrective/Preventive Action: {complaint.CorrectivePreventiveAction}",
+                                    f"Action Date: {complaint.CorrectivePreventiveActionDate.strftime('%B %d, %Y') if complaint.CorrectivePreventiveActionDate else 'N/A'}",
+                                    f"\nMarketing Review: {complaint.MarketingReview}",
+                                    f"Marketing Review Date: {complaint.MarketingReviewDate.strftime('%B %d, %Y') if complaint.MarketingReviewDate else 'N/A'}",
+                                    f"\nPlant Head Review: {complaint.PlantHeadReview}",
+                                    f"Plant Head Review Date: {complaint.PlantHeadReviewDate.strftime('%B %d, %Y') if complaint.PlantHeadReviewDate else 'N/A'}",
+                                    f"\nHOD Review: {complaint.HODReview}",
+                                    f"HOD Review Date: {complaint.HODReviewDate.strftime('%B %d, %Y') if complaint.HODReviewDate else 'N/A'}",
+                                ]
+                                
+                                verified_data = "\n".join(verified_data_parts)
+                                
+                                # Prompt for Ollama to generate human-friendly solution
+                                customer_message = (
+                                    "Based on all the investigation data, root cause analysis, corrective actions taken, "
+                                    "and all reviews completed, write a warm and professional solution message for the customer. "
+                                    "Explain in simple human language what was the problem, what we found, what we did to fix it, "
+                                    "and reassure them that the issue is now resolved. Keep it concise and friendly."
+                                )
+                                
+                                # Generate solution with Ollama
+                                ollama_solution = ollama_client.generate_reply(customer_message, verified_data)
+                                
+                                # Save the generated solution to Solution column
+                                complaint.Solution = ollama_solution or (
+                                    f"We identified the root cause and have successfully taken corrective actions. "
+                                    f"All reviews have been completed. Your complaint is now resolved."
+                                )
+                                complaint.Status = "Resolved"
+                                complaint.UpdatedDate = datetime.now()
+                                complaint.UpdatedBy = "System"
+                                db.commit()
+                                
+                                verified_data = f"Complaint {complaint_id} resolved"
+                                
+                                # Show the generated solution with greeting
+                                template_reply = (
+                                    f"Dear {complaint.ComplaintID},\n\n"
+                                    f"Thank you for reaching out to us regarding your concern. We have reviewed the information you provided and are pleased to inform you that your complaint has been resolved.\n\n"
+                                    f"{complaint.Solution}"
+                                )
+                        
+                        else:
+                            # Not all columns are complete - keep under review
+                            overall_status = "Under Review"
+                            verified_data = f"Complaint {complaint_id} under review - incomplete investigation"
+                            
+                            template_reply = (
+                                f"Hello {current_user.User_Name},\n\n"
+                                f"**Complaint ID:** {complaint.ComplaintID}\n"
+                                f"**Status:** 📝 Under Review\n\n"
+                                f"Your complaint is currently being investigated. Our team is working through the following stages:\n"
+                            )
+                            
+                            if has_root_cause and has_root_cause_date:
+                                template_reply += f"✅ Root cause analysis completed\n"
+                            else:
+                                template_reply += f"⏳ Root cause analysis in progress\n"
+                            
+                            if has_corrective_action and has_corrective_date:
+                                template_reply += f"✅ Corrective actions taken\n"
+                            else:
+                                template_reply += f"⏳ Corrective actions pending\n"
+                            
+                            if has_marketing_review and has_marketing_date:
+                                template_reply += f"✅ Marketing review completed\n"
+                            else:
+                                template_reply += f"⏳ Marketing review pending\n"
+                            
+                            if has_plant_head_review and has_plant_head_date:
+                                template_reply += f"✅ Plant head review completed\n"
+                            else:
+                                template_reply += f"⏳ Plant head review pending\n"
+                            
+                            if has_hod_review and has_hod_date:
+                                template_reply += f"✅ HOD review completed\n"
+                            else:
+                                template_reply += f"⏳ HOD review pending\n"
+                            
+                            template_reply += (
+                                f"\nWe'll notify you as soon as all investigations are complete and the solution is ready. "
+                                f"We appreciate your patience!"
+                            )
+                        
+                        structured_data = {
+                            "complaint_id": complaint.ComplaintID,
+                            "category": complaint.CategoryType,
+                            "description": complaint.ComplaintDescription,
+                            "po_number": complaint.PONumber,
+                            "dispatch_date": complaint.DispatchDate.strftime('%Y-%m-%d') if complaint.DispatchDate else None,
+                            "created_date": complaint.CreatedDate.strftime('%Y-%m-%d') if complaint.CreatedDate else None,
+                            "status": overall_status,
+                        }
+            else:
+                overall_status = "Not Found"
+                verified_data = f"Complaint {complaint_id} not found"
+                template_reply = (
+                    f"I couldn't find a complaint with ID **{complaint_id}** in our system.\n\n"
+                    f"Please verify the complaint ID and try again, or contact support for assistance."
+                )
+        else:
+            # No complaint ID in action, check if message mentions complaint keywords
+            msg_lower = message.lower()
+            complaint_keywords = ["complaint", "status", "solution", "issue", "resolved", "review", "track"]
+            has_complaint_keywords = any(keyword in msg_lower for keyword in complaint_keywords)
+            
+            if has_complaint_keywords:
+                # User is asking about a complaint, try to find their most recent one
+                user_complaints = db.query(ComplaintMaster).filter(
+                    ComplaintMaster.CreatedBy == current_user.User_Id
+                ).order_by(ComplaintMaster.CreatedDate.desc()).all()
+                
+                if user_complaints:
+                    # Get the most recent complaint
+                    recent_complaint = user_complaints[0]
+                    
+                    # Check if Status is "Resolved"
+                    if recent_complaint.Status == "Resolved" and recent_complaint.Solution and recent_complaint.Solution.strip():
+                        # Status is Resolved - show the solution directly with greeting
+                        verified_data = f"Complaint {recent_complaint.ComplaintID} resolved - showing solution"
+                        template_reply = (
+                            f"Dear {recent_complaint.ComplaintID},\n\n"
+                            f"Thank you for reaching out to us regarding your concern. We have reviewed the information you provided and are pleased to inform you that your complaint has been resolved.\n\n"
+                            f"{recent_complaint.Solution}"
+                        )
+                    else:
+                        # Show current status with progress
+                        has_root_cause = recent_complaint.RootCauseAnalysis and recent_complaint.RootCauseAnalysis.strip()
+                        has_root_cause_date = recent_complaint.RootCauseAnalysisDate
+                        has_corrective_action = recent_complaint.CorrectivePreventiveAction and recent_complaint.CorrectivePreventiveAction.strip()
+                        has_corrective_date = recent_complaint.CorrectivePreventiveActionDate
+                        has_marketing_review = recent_complaint.MarketingReview and recent_complaint.MarketingReview.strip()
+                        has_marketing_date = recent_complaint.MarketingReviewDate
+                        has_plant_head_review = recent_complaint.PlantHeadReview and recent_complaint.PlantHeadReview.strip()
+                        has_plant_head_date = recent_complaint.PlantHeadReviewDate
+                        has_hod_review = recent_complaint.HODReview and recent_complaint.HODReview.strip()
+                        has_hod_date = recent_complaint.HODReviewDate
+                        
+                        overall_status = "Under Review"
+                        verified_data = f"Complaint {recent_complaint.ComplaintID} status check"
+                        
+                        template_reply = (
+                            f"Hello {current_user.User_Name},\n\n"
+                            f"**Complaint ID:** {recent_complaint.ComplaintID}\n"
+                            f"**Category:** {recent_complaint.CategoryType}\n"
+                            f"**Status:** 📝 Under Review\n\n"
+                            f"Investigation Progress:\n"
+                        )
+                        
+                        if has_root_cause and has_root_cause_date:
+                            template_reply += f"✅ Root cause analysis completed\n"
+                        else:
+                            template_reply += f"⏳ Root cause analysis in progress\n"
+                        
+                        if has_corrective_action and has_corrective_date:
+                            template_reply += f"✅ Corrective actions taken\n"
+                        else:
+                            template_reply += f"⏳ Corrective actions pending\n"
+                        
+                        if has_marketing_review and has_marketing_date:
+                            template_reply += f"✅ Marketing review completed\n"
+                        else:
+                            template_reply += f"⏳ Marketing review pending\n"
+                        
+                        if has_plant_head_review and has_plant_head_date:
+                            template_reply += f"✅ Plant head review completed\n"
+                        else:
+                            template_reply += f"⏳ Plant head review pending\n"
+                        
+                        if has_hod_review and has_hod_date:
+                            template_reply += f"✅ HOD review completed\n"
+                        else:
+                            template_reply += f"⏳ HOD review pending\n"
+                        
+                        template_reply += (
+                            f"\nWe'll notify you as soon as all investigations are complete and the solution is ready. "
+                            f"We appreciate your patience!"
+                        )
+                    
+                    structured_data = {
+                        "complaint_id": recent_complaint.ComplaintID,
+                        "category": recent_complaint.CategoryType,
+                        "status": recent_complaint.Status or "Under Review",
+                    }
+                else:
+                    # No complaints found
+                    verified_data = "No complaints found for this user"
+                    template_reply = (
+                        f"Hello {current_user.User_Name}, I couldn't find any complaints in your account.\n\n"
+                        f"If you'd like to raise a new complaint, please let me know."
+                    )
+            else:
+                # User not asking about complaints, show list of all complaints for reference
+                user_complaints = db.query(ComplaintMaster).filter(
+                    ComplaintMaster.CreatedBy == current_user.User_Id
+                ).order_by(ComplaintMaster.CreatedDate.desc()).all()
+                
+                if user_complaints:
+                    verified_data = f"User has {len(user_complaints)} complaint(s)"
+                    
+                    # Build complaint list with clickable options
+                    complaint_list = []
+                    for c in user_complaints:
+                        # Determine status based on Status column or workflow columns
+                        status_text = c.Status if c.Status else "Under Review"
+                        status_emoji = "✅" if c.Status == "Resolved" else "📝"
+                        complaint_list.append(
+                            f"{status_emoji} **{c.ComplaintID}**\n"
+                            f"   Category: {c.CategoryType or 'General'}\n"
+                            f"   Status: {status_text}\n"
+                            f"   Date: {c.CreatedDate.strftime('%B %d, %Y') if c.CreatedDate else 'N/A'}"
+                        )
+                    
+                    template_reply = (
+                        f"Hello {current_user.User_Name}, here are your registered complaints:\n\n" +
+                        "\n\n".join(complaint_list) +
+                        "\n\n**Click on a complaint ID above to view its full details.**"
+                    )
+                    
+                    # Add suggested actions with complaint IDs
+                    suggested_actions = [f"view_complaint:{c.ComplaintID}" for c in user_complaints[:5]]
+                    structured_data = {"suggested_actions": suggested_actions}
+                else:
+                    verified_data = "No registered complaints found for this user."
+                    template_reply = (
+                        f"Hello {current_user.User_Name}, I couldn't find any registered complaints for your account.\n\n"
+                        f"If you'd like to raise a new complaint, please click 'Raise a Complaint'."
+                    )
+
+    # ---------------- COMPLAINT ----------------
+    elif intent == Intent.COMPLAINT:
+        # Extract complaint details from message
+        hint = extract_product_hint(message)
+        lot = extract_lot_hint(message)
+        
+        # Check if complaint category was provided via payload (new flow)
+        complaint_category = None
+        if payload.action and payload.action.startswith("complaint_category:"):
+            complaint_category = payload.action.split(":", 1)[1].strip()
+        
+        # Check if full complaint data was provided via payload
+        complaint_data = None
+        if payload.action and "complaint_details" in payload.action:
+            try:
+                import json
+                complaint_data = json.loads(payload.action)
+            except:
+                pass
+        
+        if complaint_data:
+            # Store the complaint
+            complaint_id = f"CMP-{date.today().strftime('%Y%m%d')}-{db.query(ComplaintMaster).filter(ComplaintMaster.CreatedDate >= date.today()).count() + 1:04d}"
+            complaint = ComplaintMaster(
+                ComplaintID=complaint_id,
+                CategoryType=complaint_data.get("category", "General"),
+                ComplaintDescription=complaint_data.get("description", ""),
+                PONumber=complaint_data.get("po_number"),
+                DispatchDate=complaint_data.get("dispatch_date"),
+                CreatedBy=current_user.User_Id,
+                CreatedDate=datetime.now(),
+                Status="Under Review"
+            )
+            db.add(complaint)
+            db.commit()
+            
+            structured_data = {"complaint_id": complaint_id}
+            verified_data = f"Complaint ID: {complaint_id}"
+            template_reply = (
+                f"Thank you for reporting this issue, {current_user.User_Name}. "
+                f"Your complaint has been registered with tracking number **{complaint_id}**.\n\n"
+                f"We will investigate the issue and keep you updated on the resolution.\n\n"
+                f"If you need to reference this complaint, please use the ID: {complaint_id}"
+            )
+        elif complaint_category:
+            # Category selected, ask for PO number, dispatch date, and description
+            verified_data = f"Complaint category {complaint_category} selected, awaiting details"
+            template_reply = (
+                f"You have selected: **{complaint_category}**\n\n"
+                f"Please provide the following details to register your complaint:\n\n"
+                f"1. **PO Number**\n"
+                f"2. **Dispatch Date**\n"
+                f"3. **Complaint Description**\n\n"
+                f"You can respond with this information and I'll register your complaint."
+            )
+        else:
+            # Check if message explicitly mentions "new" complaint or "raise" complaint
+            # If so, skip the existing complaints check and go straight to category selection
+            msg_lower = message.lower()
+            wants_new_complaint = any(phrase in msg_lower for phrase in [
+                "raise a new", "new complaint", "raise complaint", "file complaint", 
+                "register complaint", "create complaint", "submit complaint"
+            ])
+            
+            if not wants_new_complaint:
+                # Check if user has previous complaints
+                previous_complaints = db.query(ComplaintMaster).filter(
+                    ComplaintMaster.CreatedBy == current_user.User_Id
+                ).order_by(ComplaintMaster.CreatedDate.desc()).limit(3).all()
+                
+                if previous_complaints:
+                    # User has previous complaints, ask if they want to track one or raise new
+                    verified_data = "Complaint pending - has previous complaints"
+                    complaint_list = "\n".join(
+                        f"• **{c.ComplaintID}** - {c.CategoryType} ({c.CreatedDate.strftime('%Y-%m-%d')})"
+                        for c in previous_complaints
+                    )
+                    template_reply = (
+                        f"Hello {current_user.User_Name}, I can help you with your complaint request.\n\n"
+                        f"You have {len(previous_complaints)} previous complaint(s):\n{complaint_list}\n\n"
+                        f"Do you want to:\n"
+                        f"1. **Track the status of an existing complaint** (provide the complaint ID)\n"
+                        f"2. **Raise a new complaint**"
+                    )
+                else:
+                    # No previous complaints, show category buttons
+                    verified_data = "Complaint pending category selection"
+                    template_reply = (
+                        f"Hello {current_user.User_Name}, I'm sorry to hear you're experiencing an issue.\n\n"
+                        f"Please select one of the following complaint categories to proceed:"
+                    )
+            else:
+                # User explicitly wants to raise a new complaint, show category buttons
+                verified_data = "Complaint pending category selection"
+                template_reply = (
+                    f"Hello {current_user.User_Name}, I'm sorry to hear you're experiencing an issue.\n\n"
+                    f"Please select one of the following complaint categories to proceed:"
+                )
+
+    # ---------------- WHATSAPP_CONTACT ----------------
+    elif intent == Intent.WHATSAPP_CONTACT:
+        if settings.COMPANY_SUPPORT_EMAIL:
+            structured_data = {"email": settings.COMPANY_SUPPORT_EMAIL}
+            verified_data = f"Email: {settings.COMPANY_SUPPORT_EMAIL}"
+            template_reply = f"You can reach us by email at {settings.COMPANY_SUPPORT_EMAIL}."
+        else:
+            verified_data = "Email not configured."
+            template_reply = "Our email contact isn't configured yet. Please check back soon or ask for human support."
+
+    # ---------------- HUMAN_SUPPORT ----------------
+    elif intent == Intent.HUMAN_SUPPORT:
+        contacts = []
+        if settings.COMPANY_SUPPORT_EMAIL:
+            contacts.append(f"email at {settings.COMPANY_SUPPORT_EMAIL}")
+        if settings.COMPANY_SUPPORT_PHONE:
+            contacts.append(f"phone at {settings.COMPANY_SUPPORT_PHONE}")
+        if current_user.ResponsibleSeller:
+            contacts.append(f"your account manager, {current_user.ResponsibleSeller}")
+        verified_data = "; ".join(contacts) or "No support contact configured."
+        if contacts:
+            template_reply = f"I can connect you with our team. You can reach {', or '.join(contacts)}."
+        else:
+            template_reply = (
+                "I can share what's available from our records, but a specific support "
+                "contact isn't configured yet. Please check back soon or ask for human support."
+            )
+
+    # ---------------- GREETING ----------------
+    elif intent == Intent.GREETING:
+        verified_data = "greeting"
+        # Fetch customer company name if CID is linked
+        customer_company = None
+        if current_user.CID:
+            customer = db.query(CustomerDetail).filter(CustomerDetail.CID == current_user.CID).first()
+            if customer:
+                customer_company = customer.CustomerName
+        
+        # Build greeting with user name and/or company
+        user_display = current_user.User_Name or ""
+        if customer_company:
+            greeting_prefix = f"Hello {user_display} from {customer_company}" if user_display else f"Hello from {customer_company}"
+        elif user_display:
+            greeting_prefix = f"Hello {user_display}"
+        else:
+            greeting_prefix = "Hello"
+            
+        template_reply = (
+            f"{greeting_prefix}! I can help with customer information, "
+            f"products, Iron Ore specifications, Iron Pellet specifications, and quotation, "
+            f"order, or complaint requests. You can also contact us via email at {settings.COMPANY_SUPPORT_EMAIL}. What would you like to know?"
+        )
+
+    # ---------------- UNKNOWN ----------------
+    else:
+        verified_data = "No matching intent."
+        
+        # Get customer name for personalization
+        customer_company = None
+        if current_user.CID:
+            customer = db.query(CustomerDetail).filter(CustomerDetail.CID == current_user.CID).first()
+            if customer:
+                customer_company = customer.CustomerName
+        
+        user_display = current_user.User_Name or ""
+        if customer_company:
+            personalized_greeting = f"{user_display} from {customer_company}" if user_display else f"{customer_company}"
+        elif user_display:
+            personalized_greeting = user_display
+        else:
+            personalized_greeting = "Customer"
+        
+        # Send admin notification for unknown intents
+        try:
+            from . import notification
+            from fastapi import FastAPI
+            from app.database import SessionLocal
+            from app.models import LoginMaster
+            
+            # Get admin info for notification
+            admin = db.query(LoginMaster).filter(LoginMaster.User_Role == "Admin").first()
+            admin_name = admin.User_Name if admin else "Admin"
+            
+            # Create a temporary session to call the notification router
+            db2 = SessionLocal()
+            try:
+                notification_request = notification.create_alert(
+                    title="Unknown Customer Query",
+                    message=f"User '{user_display}' asked: '{message or payload.action}'\n\n"
+                           f"Customer: {personalized_greeting}\n"
+                           f"User ID: {current_user.User_Id}\n"
+                           f"User Role: {current_user.User_Role or 'N/A'}",
+                    requestor_user_id=current_user.User_Id,
+                    requestor_name=user_display or current_user.User_Id,
+                    db=db2
+                )
+            finally:
+                db2.close()
+        except Exception as e:
+            print(f"Failed to send admin notification: {e}")
+        
+        template_reply = (
+            f"Dear {personalized_greeting},\n\n"
+            f"Thank you for your inquiry. I couldn't find information about this in our database.\n\n"
+            f"Our admin team has been notified and will review your request. They may contact you "
+            f"for additional details.\n\n"
+            f"If you need immediate assistance, please contact us via WhatsApp at "
+            f"{settings.COMPANY_WHATSAPP_NUMBER or 'the support number'} or email at "
+            f"{settings.COMPANY_SUPPORT_EMAIL or 'support@company.com'}.\n\n"
+            f"Best regards,\nCRM Bot Team"
+        )
+
+    # Try Ollama for natural phrasing of the verified data; fall back to
+    # the template if Ollama is unavailable or errors.
+    # Skip Ollama for greetings and pending/interactive flows
+    skip_ollama_intents = (Intent.GREETING,)
+    skip_ollama_phrases = [
+        "pending category selection",
+        "pending - has previous complaints",
+        "awaiting details",
+        "user has",  # For complaint list display like "User has 3 complaint(s)"
+        "complaint(s)",
+        "under review - missing data"  # Skip Ollama for incomplete complaints
+    ]
+    
+    should_use_ollama = (
+        intent not in skip_ollama_intents and
+        not any(phrase in verified_data.lower() for phrase in skip_ollama_phrases)
+    )
+    
+    generated = None
+    if should_use_ollama:
+        generated = ollama_client.generate_reply(message or payload.action or "", verified_data)
+
+    final_reply = generated or template_reply
+    final_reply = _sanitize_reply(final_reply, current_user.CID, db)
+
+    return ChatResponse(
+        reply=final_reply,
+        intent=intent.value,
+        data=structured_data,
+        suggested_actions=ALL_ACTIONS,
+    )

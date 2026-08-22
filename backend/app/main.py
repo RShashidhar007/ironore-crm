@@ -1,0 +1,40 @@
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+
+from .config import settings
+from .database import Base, engine
+from .routers import auth, customer, product, chat, complaint, notification
+
+app = FastAPI(
+    title="Iron Ore / Iron Pellet CRM Bot API",
+    description="Backend for the CRM chatbot. Ollama and the frontend both talk to this API only.",
+    version="1.0.0",
+)
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[settings.FRONTEND_ORIGIN],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+app.include_router(auth.router)
+app.include_router(customer.router)
+app.include_router(product.router)
+app.include_router(chat.router)
+app.include_router(complaint.router)
+app.include_router(notification.router)
+
+
+@app.on_event("startup")
+def on_startup():
+    # In SQLite mode, make sure tables exist. Against a real
+    # SQL Server (DB_MODE=mssql) the six tables are assumed to already
+    # exist and this call is a harmless no-op for existing tables.
+    Base.metadata.create_all(bind=engine)
+
+
+@app.get("/api/health")
+def health():
+    return {"status": "ok"}
