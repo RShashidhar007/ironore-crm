@@ -224,7 +224,7 @@ def chat(
             structured_data = {"PID": product.PID, "name": product.ProductName,
                                 "category": cat_name, "status": product.PStatus}
             verified_data = f"{product.PID}: {product.ProductName}, category={cat_name}, status={product.PStatus}"
-            template_reply = f"{product.ProductName} (ID: {product.PID}) belongs to {cat_name}.{status_note}"
+            template_reply = f"{product.ProductName} belongs to {cat_name}.{status_note}"
         else:
             products = db.query(ProductMaster).all()
             structured_data = [
@@ -235,7 +235,7 @@ def chat(
             ]
             verified_data = "\n".join(f"{p.PID}: {p.ProductName} ({p.PStatus})" for p in products) or "No products found."
             if products:
-                lines = "\n".join(f"- {p.ProductName} (ID: {p.PID}){'' if p.PStatus == 1 else ' — inactive'}"
+                lines = "\n".join(f"- {p.ProductName}{'' if p.PStatus == 1 else ' — inactive'}"
                                    for p in products)
                 template_reply = f"Here are our available products:\n\n{lines}"
             else:
@@ -497,7 +497,7 @@ def chat(
                         overall_status = "Resolved"
                         verified_data = f"Complaint {complaint_id} resolved"
                         template_reply = (
-                            f"Dear {complaint.ComplaintID},\n\n"
+                            f"Dear {current_user.User_Name},\n\n"
                             f"Thank you for reaching out to us regarding your concern. We have reviewed the information you provided and are pleased to inform you that your complaint has been resolved.\n\n"
                             f"{complaint.Solution}"
                         )
@@ -538,7 +538,7 @@ def chat(
                                 
                                 # Show ONLY the solution from database with greeting
                                 template_reply = (
-                                    f"Dear {complaint.ComplaintID},\n\n"
+                                    f"Dear {current_user.User_Name},\n\n"
                                     f"Thank you for reaching out to us regarding your concern. We have reviewed the information you provided and are pleased to inform you that your complaint has been resolved.\n\n"
                                     f"{complaint.Solution}"
                                 )
@@ -589,7 +589,7 @@ def chat(
                                 
                                 # Show the generated solution with greeting
                                 template_reply = (
-                                    f"Dear {complaint.ComplaintID},\n\n"
+                                    f"Dear {current_user.User_Name},\n\n"
                                     f"Thank you for reaching out to us regarding your concern. We have reviewed the information you provided and are pleased to inform you that your complaint has been resolved.\n\n"
                                     f"{complaint.Solution}"
                                 )
@@ -673,7 +673,7 @@ def chat(
                         # Status is Resolved - show the solution directly with greeting
                         verified_data = f"Complaint {recent_complaint.ComplaintID} resolved - showing solution"
                         template_reply = (
-                            f"Dear {recent_complaint.ComplaintID},\n\n"
+                            f"Dear {current_user.User_Name},\n\n"
                             f"Thank you for reaching out to us regarding your concern. We have reviewed the information you provided and are pleased to inform you that your complaint has been resolved.\n\n"
                             f"{recent_complaint.Solution}"
                         )
@@ -994,8 +994,15 @@ def chat(
 
     # Try Ollama for natural phrasing of the verified data; fall back to
     # the template if Ollama is unavailable or errors.
-    # Skip Ollama for greetings and pending/interactive flows
-    skip_ollama_intents = (Intent.GREETING,)
+    # Skip Ollama for greetings and pending/interactive flows.
+    # COMPLAINT and COMPLAINT_TRACKING are also skipped here: those branches
+    # already build the final customer-facing reply themselves (including,
+    # for COMPLAINT_TRACKING, their own dedicated Ollama call to phrase the
+    # resolution Solution). verified_data for those branches is often just a
+    # short internal marker like "Complaint CMP-... resolved" -- re-running
+    # Ollama on that marker here would silently replace the real solution
+    # text with a generic reply generated from almost no context.
+    skip_ollama_intents = (Intent.GREETING, Intent.COMPLAINT, Intent.COMPLAINT_TRACKING)
     skip_ollama_phrases = [
         "pending category selection",
         "pending - has previous complaints",

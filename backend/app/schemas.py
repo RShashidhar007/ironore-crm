@@ -124,9 +124,7 @@ class ComplaintOut(BaseModel):
     ComplaintDescription: Optional[str] = None
     PONumber: Optional[str] = None
     DispatchDate: Optional[date] = None
-    Summary: Optional[str] = None
     Solution: Optional[str] = None
-    Progress: Optional[str] = None
     Status: Optional[str] = None
     CreatedBy: Optional[str] = None
     CreatedDate: Optional[date] = None

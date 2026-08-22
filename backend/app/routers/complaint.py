@@ -78,14 +78,6 @@ def create_complaint(
     
     complaint_id = f"CMP-{today_str}-{today_complaints + 1:04d}"
     
-    # Generate AI summary and solution
-    summary, solution = generate_complaint_summary_and_solution(
-        category=payload.category_type or "General",
-        description=payload.description,
-        po_number=payload.po_number,
-        dispatch_date=payload.dispatch_date
-    )
-    
     # Create complaint record
     complaint = ComplaintMaster(
         ComplaintID=complaint_id,
@@ -93,9 +85,6 @@ def create_complaint(
         ComplaintDescription=payload.description,
         PONumber=payload.po_number,
         DispatchDate=datetime.strptime(payload.dispatch_date, "%Y-%m-%d").date() if payload.dispatch_date else None,
-        Summary=summary,
-        Solution=solution,
-        Progress="Complaint registered and under initial review",
         Status="Under Review",
         CreatedBy=user_id,
         CreatedDate=datetime.now(),
@@ -111,9 +100,7 @@ def create_complaint(
         ComplaintDescription=complaint.ComplaintDescription,
         PONumber=complaint.PONumber,
         DispatchDate=complaint.DispatchDate,
-        Summary=complaint.Summary,
         Solution=complaint.Solution,
-        Progress=complaint.Progress,
         Status=complaint.Status,
         CreatedBy=complaint.CreatedBy,
         CreatedDate=complaint.CreatedDate.date() if complaint.CreatedDate else None,
