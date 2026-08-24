@@ -853,8 +853,16 @@ def chat(
                     has_plant_head_review = complaint.PlantHeadReview and complaint.PlantHeadReview.strip()
                     has_plant_head_date = complaint.PlantHeadReviewDate
                     
-                    # Check if main workflow columns are filled (don't require HOD)
-                    main_workflow_complete = (
+                    # Check if ANY workflow columns are filled (one or more)
+                    any_workflow_filled = (
+                        has_root_cause or has_root_cause_date or
+                        has_corrective_action or has_corrective_date or
+                        has_marketing_review or has_marketing_date or
+                        has_plant_head_review or has_plant_head_date
+                    )
+                    
+                    # Check if ALL workflow columns are filled (only then show "will be resolved in 2-3 days")
+                    all_workflow_complete = (
                         has_root_cause and has_root_cause_date and
                         has_corrective_action and has_corrective_date and
                         has_marketing_review and has_marketing_date and
@@ -872,8 +880,8 @@ def chat(
                             f"**Status:** ✅ Resolved\n\n"
                             f"Your complaint has been resolved. Thank you for your patience."
                         )
-                    elif main_workflow_complete:
-                        # Status 2: Will be resolved in 2-3 working days
+                    elif all_workflow_complete:
+                        # Status 2: Will be resolved in 2-3 working days (ALL workflow fields filled)
                         # Auto-generate solution if not already generated
                         if not complaint.Solution or not complaint.Solution.strip():
                             # Generate solution with Ollama
@@ -920,7 +928,7 @@ def chat(
                             f"Our team is finalizing the resolution. Thank you for your patience."
                         )
                     else:
-                        # Status 1: Under Review
+                        # Status 1: Under Review (only category + description, or any workflow fields filled but not all)
                         overall_status = "Under Review"
                         verified_data = f"Complaint {complaint_id} under review"
                         template_reply = (
@@ -968,8 +976,16 @@ def chat(
                     has_plant_head_review = recent_complaint.PlantHeadReview and recent_complaint.PlantHeadReview.strip()
                     has_plant_head_date = recent_complaint.PlantHeadReviewDate
                     
-                    # Check if main workflow columns are filled
-                    main_workflow_complete = (
+                    # Check if ANY workflow columns are filled (one or more)
+                    any_workflow_filled = (
+                        has_root_cause or has_root_cause_date or
+                        has_corrective_action or has_corrective_date or
+                        has_marketing_review or has_marketing_date or
+                        has_plant_head_review or has_plant_head_date
+                    )
+                    
+                    # Check if ALL workflow columns are filled (only then show "will be resolved in 2-3 days")
+                    all_workflow_complete = (
                         has_root_cause and has_root_cause_date and
                         has_corrective_action and has_corrective_date and
                         has_marketing_review and has_marketing_date and
@@ -985,7 +1001,7 @@ def chat(
                             f"**Status:** ✅ Resolved\n\n"
                             f"Your complaint has been resolved. Thank you for your patience."
                         )
-                    elif main_workflow_complete:
+                    elif all_workflow_complete:
                         overall_status = "In Progress"
                         
                         # Auto-generate solution if not already generated
