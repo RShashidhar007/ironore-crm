@@ -115,11 +115,11 @@ class InventoryMaster(Base):
 
     InventoryID = Column(Integer, primary_key=True, autoincrement=True)
     PID = Column(String(50), ForeignKey("Product_Master.PID"))
-    Category = Column(String(100))
-    QuantityMT = Column(Integer)  # Available quantity in MT
+    Category = Column(String(100))  # "Produced" or "Sold"
+    QuantityMT = Column(Integer)  # Quantity in Metric Tons (MT)
     ProducedDate = Column(Date)
-    InitialPrice = Column(Integer)
-    SellingPrice = Column(Integer)
+    InitialPrice = Column(Integer)  # Price per MT (in currency)
+    SellingPrice = Column(Integer)  # Price per MT (in currency)
 
 
 class ComplaintMaster(Base):

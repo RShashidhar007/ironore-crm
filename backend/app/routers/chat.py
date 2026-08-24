@@ -32,6 +32,14 @@ from ..intent import (
 
 router = APIRouter(prefix="/api/chat", tags=["chat"])
 
+
+def format_price_per_mt(price: Optional[int], currency: str = "INR") -> str:
+    """Format a price with per MT unit. E.g., 4500 INR/MT"""
+    if price is None:
+        return "N/A"
+    return f"{price:,} {currency}/MT"
+
+
 ALL_ACTIONS = [
     "Ask for a Quotation",
     "Place an Order",

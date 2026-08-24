@@ -9,6 +9,9 @@ NOTE: Against a real SQL Server (DB_MODE=mssql) the six tables are
 expected to already exist with production data — you would not
 normally run this seeder there, or you'd adapt it into a controlled
 migration.
+
+PRICING NOTE: All prices (InitialPrice, SellingPrice) are stored 
+in currency per Metric Ton (MT). For example, 4500 means 4500 INR/MT.
 """
 from datetime import date
 
