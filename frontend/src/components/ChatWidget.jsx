@@ -28,6 +28,7 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
   const [complaintOption, setComplaintOption] = useState(null)
   const [selectedField, setSelectedField] = useState(null)
   const [orderDetails, setOrderDetails] = useState({ selectedProduct: null, quantity: '', availableQuantity: null })
+  const [quotationDetails, setQuotationDetails] = useState({ selectedProduct: null, quantity: '', showForm: false })
   const selectedFieldRef = useRef(null)
   const scrollRef = useRef(null)
   const handledActionRef = useRef(null)
@@ -115,6 +116,9 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
       // Check if response is for order placement
       const isOrderResponse = text === 'Place an Order' || action === 'Place an Order'
       
+      // Check if response is for quotation request
+      const isQuotationResponse = text === 'Ask for a Quotation' || action === 'Ask for a Quotation'
+      
       setMessages((prev) => [...prev, { 
         role: 'bot', 
         text: res.reply,
@@ -122,7 +126,9 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
         showComplaintForm: false,
         showPreviousComplaintsOptions: hasPreviousComplaints,
         showOrderProducts: isOrderResponse,
-        orderProducts: isOrderResponse && res.data ? res.data : []
+        orderProducts: isOrderResponse && res.data ? res.data : [],
+        showQuotationProducts: isQuotationResponse && res.structured_data && res.structured_data.products ? true : false,
+        quotationProducts: isQuotationResponse && res.structured_data && res.structured_data.products ? res.structured_data.products : []
       }])
     } catch (err) {
       const msg = err instanceof ApiError
@@ -170,6 +176,24 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
     })
   }
 
+  function handleSelectQuotationProduct(product) {
+    setQuotationDetails({ selectedProduct: product, quantity: '', showForm: true })
+    // Update the last bot message to show quotation form
+    setMessages((prev) => {
+      const newMessages = [...prev]
+      const lastBotMsgIndex = newMessages.map((m, i) => m.role === 'bot' ? i : -1).filter(i => i !== -1).pop()
+      if (lastBotMsgIndex !== undefined) {
+        newMessages[lastBotMsgIndex] = {
+          ...newMessages[lastBotMsgIndex],
+          showQuotationProducts: false,
+          showQuotationForm: true,
+          selectedQuotationProduct: product
+        }
+      }
+      return newMessages
+    })
+  }
+
   async function submitOrder() {
     if (!orderDetails.selectedProduct || !orderDetails.quantity) return
     
@@ -190,6 +214,35 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
       const msg = err instanceof ApiError
         ? err.message
         : "I'm unable to process your order right now. Please try again."
+      setMessages((prev) => [...prev, { role: 'bot', text: msg, isError: true }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function submitQuotation() {
+    if (!quotationDetails.selectedProduct || !quotationDetails.quantity) return
+    
+    setLoading(true)
+    try {
+      // Send quotation request with product PID and quantity
+      const res = await api.chat(
+        `Quotation: Product ${quotationDetails.selectedProduct.pid}, Quantity: ${quotationDetails.quantity} MT`,
+        `submit_quantity_quotation:${quotationDetails.selectedProduct.pid}:${quotationDetails.quantity}`
+      )
+      
+      setMessages((prev) => [...prev, { 
+        role: 'bot', 
+        text: res.reply,
+        showQuotationForm: false
+      }])
+      
+      // Reset quotation details after submission
+      setQuotationDetails({ selectedProduct: null, quantity: '', showForm: false })
+    } catch (err) {
+      const msg = err instanceof ApiError
+        ? err.message
+        : "I'm unable to generate your quotation right now. Please try again."
       setMessages((prev) => [...prev, { role: 'bot', text: msg, isError: true }])
     } finally {
       setLoading(false)
@@ -224,6 +277,7 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
     setComplaintDetails({ category: '', description: '', poNumber: '', dispatchDate: '', complaintIdInput: '' })
     setComplaintOption(null)
     setOrderDetails({ selectedProduct: null })
+    setQuotationDetails({ selectedProduct: null, quantity: '', showForm: false })
   }
 
   function toggleListening() {
@@ -389,7 +443,14 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
                 onOrderQuantityChange={(value) => setOrderDetails({ ...orderDetails, quantity: value })}
                 onSubmitOrder={submitOrder}
                 availableQuantity={m.availableQuantity}
-                loading={loading}
+                showQuotationProducts={m.showQuotationProducts || false}
+                quotationProducts={m.quotationProducts || []}
+                onSelectQuotationProduct={handleSelectQuotationProduct}
+                showQuotationForm={m.showQuotationForm || false}
+                selectedQuotationProduct={m.selectedQuotationProduct}
+                quotationQuantity={quotationDetails.quantity}
+                onQuotationQuantityChange={(value) => setQuotationDetails({ ...quotationDetails, quantity: value })}
+                onSubmitQuotation={submitQuotation}
               />
             ))}
             {loading && (
