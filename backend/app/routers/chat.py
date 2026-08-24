@@ -1317,7 +1317,7 @@ def chat(
     # short internal marker like "Complaint CMP-... resolved" -- re-running
     # Ollama on that marker here would silently replace the real solution
     # text with a generic reply generated from almost no context.
-    skip_ollama_intents = (Intent.GREETING, Intent.COMPLAINT, Intent.COMPLAINT_TRACKING, Intent.ORDER_REQUEST, Intent.PRODUCT_INFORMATION)
+    skip_ollama_intents = (Intent.GREETING, Intent.COMPLAINT, Intent.COMPLAINT_TRACKING, Intent.ORDER_REQUEST, Intent.PRODUCT_INFORMATION, Intent.QUOTATION_REQUEST)
     skip_ollama_phrases = [
         "pending category selection",
         "pending - has previous complaints",
