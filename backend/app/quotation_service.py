@@ -90,12 +90,12 @@ def create_quotation(
         ).order_by(desc(InventoryMaster.ProducedDate)).first()
         
         if latest_inventory and latest_inventory.InitialPrice:
-            avg_price = latest_inventory.InitialPrice
+            avg_price = float(latest_inventory.InitialPrice)
         else:
             avg_price = 0.0
     
-    # Calculate total amount
-    total_amount = quantity_mt * avg_price
+    # Calculate total amount (ensure both are floats)
+    total_amount = float(quantity_mt) * float(avg_price)
     
     # Generate quotation number
     quotation_number = generate_quotation_number(db)

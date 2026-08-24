@@ -127,8 +127,8 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
         showPreviousComplaintsOptions: hasPreviousComplaints,
         showOrderProducts: isOrderResponse,
         orderProducts: isOrderResponse && res.data ? res.data : [],
-        showQuotationProducts: isQuotationResponse && res.structured_data && res.structured_data.products ? true : false,
-        quotationProducts: isQuotationResponse && res.structured_data && res.structured_data.products ? res.structured_data.products : []
+        showQuotationProducts: isQuotationResponse && res.data && res.data.products ? true : false,
+        quotationProducts: isQuotationResponse && res.data && res.data.products ? res.data.products : []
       }])
     } catch (err) {
       const msg = err instanceof ApiError
