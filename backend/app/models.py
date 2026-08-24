@@ -6,8 +6,10 @@ transactional tables (Orders, Inventory, Quotations, Dispatch,
 Complaints) here until they actually exist in the database — the rest
 of the application is written to explicitly say those features are
 "not yet available" rather than assume they exist.
+
+QUOTATION_MASTER: Now added to track customer quotation requests with pricing history.
 """
-from sqlalchemy import Column, Integer, String, Date, ForeignKey, DateTime
+from sqlalchemy import Column, Integer, String, Date, ForeignKey, DateTime, Float, Text
 from sqlalchemy.orm import relationship
 
 from .database import Base
@@ -145,5 +147,28 @@ class ComplaintMaster(Base):
     Status = Column(String(50), default='Under Review')  # Complaint status
     CreatedBy = Column(String(100))
     CreatedDate = Column(DateTime, nullable=False)
+    UpdatedBy = Column(String(100))
+    UpdatedDate = Column(DateTime)
+
+
+class QuotationMaster(Base):
+    __tablename__ = "Quotations_Master"
+
+    QuotationID = Column(Integer, primary_key=True, autoincrement=True)
+    QuotationNumber = Column(String(50), unique=True, nullable=False)  # e.g., QT-2026-08-001
+    CID = Column(String(50), ForeignKey("Customer_Detail.CID"))
+    PID = Column(String(50), ForeignKey("Product_Master.PID"))
+    ProductName = Column(String(250))
+    QuantityMT = Column(Float)  # Quantity requested in Metric Tons
+    PricePerMT = Column(Float)  # Quoted price per MT
+    TotalAmount = Column(Float)  # QuantityMT * PricePerMT
+    ValidityDays = Column(Integer, default=7)  # Quote validity period
+    Notes = Column(Text)  # Additional notes/terms
+    Status = Column(String(50), default='Generated')  # Generated, Accepted, Rejected, Expired
+    CreatedBy = Column(String(100))
+    CreatedDate = Column(DateTime, nullable=False)
+    ExpiryDate = Column(DateTime)
+    AcceptedDate = Column(DateTime)
+    PDFFilePath = Column(String(500))  # Path to generated PDF
     UpdatedBy = Column(String(100))
     UpdatedDate = Column(DateTime)

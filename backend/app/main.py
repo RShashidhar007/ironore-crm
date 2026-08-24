@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from .config import settings
 from .database import Base, engine
-from .routers import auth, customer, product, chat, complaint, notification
+from .routers import auth, customer, product, chat, complaint, notification, quotation
 
 app = FastAPI(
     title="Iron Ore / Iron Pellet CRM Bot API",
@@ -25,6 +25,7 @@ app.include_router(product.router)
 app.include_router(chat.router)
 app.include_router(complaint.router)
 app.include_router(notification.router)
+app.include_router(quotation.router)
 
 
 @app.on_event("startup")

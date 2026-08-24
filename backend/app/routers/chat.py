@@ -351,49 +351,149 @@ def chat(
 
     # ---------------- QUOTATION_REQUEST ----------------
     elif intent == Intent.QUOTATION_REQUEST:
-        verified_data = "Quotation table does not exist yet."
-        
-        # Get personalized greeting
-        customer_company = None
-        if current_user.CID:
-            customer = db.query(CustomerDetail).filter(CustomerDetail.CID == current_user.CID).first()
-            if customer:
-                customer_company = customer.CustomerName
-        user_display = current_user.User_Name or current_user.User_Id
-        if customer_company:
-            personalized_greeting = f"{user_display} from {customer_company}"
+        # Check if this is a quotation request with product and quantity
+        if payload.action and payload.action.startswith("generate_quotation:"):
+            # Parse action: generate_quotation:PID:quantity:notes
+            parts = payload.action.split(":")
+            if len(parts) >= 3:
+                product_pid = parts[1]
+                try:
+                    requested_quantity = float(parts[2])
+                    notes = ":".join(parts[3:]) if len(parts) > 3 else ""
+                except (ValueError, IndexError):
+                    template_reply = "Invalid quantity format. Please provide a valid number."
+                    verified_data = "Invalid quotation request format"
+                    structured_data = {}
+                else:
+                    # Find product
+                    product = db.query(ProductMaster).filter(ProductMaster.PID == product_pid).first()
+                    if not product:
+                        template_reply = f"Product {product_pid} not found. Please check the product ID and try again."
+                        verified_data = f"Product not found: {product_pid}"
+                        structured_data = {}
+                    else:
+                        try:
+                            from ..quotation_service import (
+                                create_quotation,
+                                get_price_history,
+                                format_quotation_text
+                            )
+                            
+                            # Create quotation
+                            quotation = create_quotation(
+                                db=db,
+                                customer_id=current_user.CID,
+                                product_id=product_pid,
+                                product_name=product.ProductName,
+                                quantity_mt=requested_quantity,
+                                created_by=current_user.User_Id,
+                                validity_days=7,
+                                notes=notes
+                            )
+                            
+                            # Get price history
+                            price_history = get_price_history(db, product_pid, limit=3)
+                            
+                            # Format response
+                            template_reply = format_quotation_text(
+                                quotation_number=quotation.QuotationNumber,
+                                product_name=product.ProductName,
+                                quantity_mt=requested_quantity,
+                                price_per_mt=quotation.PricePerMT,
+                                total_amount=quotation.TotalAmount,
+                                price_history=price_history,
+                                validity_days=7
+                            )
+                            
+                            verified_data = f"Quotation created: {quotation.QuotationNumber}"
+                            structured_data = {
+                                "quotation_id": quotation.QuotationID,
+                                "quotation_number": quotation.QuotationNumber,
+                                "product_id": product_pid,
+                                "quantity_mt": requested_quantity,
+                                "price_per_mt": quotation.PricePerMT,
+                                "total_amount": quotation.TotalAmount,
+                                "pdf_path": quotation.PDFFilePath
+                            }
+                        except Exception as e:
+                            template_reply = f"Error generating quotation: {str(e)}"
+                            verified_data = f"Quotation generation failed: {str(e)}"
+                            structured_data = {}
         else:
-            personalized_greeting = user_display
-        
-        # Send admin notification
-        try:
-            from . import notification
-            from app.database import SessionLocal
+            # Initial quotation request - ask for product and quantity
+            verified_data = "Quotation system ready"
             
-            db2 = SessionLocal()
+            # Get available products
+            all_products = db.query(ProductMaster).all()
+            available_products = []
+            
+            for product in all_products:
+                # Calculate available for each product
+                produced = db.query(
+                    func.sum(InventoryMaster.QuantityMT)
+                ).filter(
+                    InventoryMaster.PID == product.PID,
+                    InventoryMaster.Category == 'Produced'
+                ).scalar() or 0
+                
+                sold = db.query(
+                    func.sum(InventoryMaster.QuantityMT)
+                ).filter(
+                    InventoryMaster.PID == product.PID,
+                    InventoryMaster.Category == 'Sold'
+                ).scalar() or 0
+                
+                available = float(produced) - float(sold)
+                
+                # Only include if available
+                if available > 0:
+                    available_products.append(product)
+            
+            user_display = current_user.User_Name or current_user.User_Id
+            
+            # Send admin notification
             try:
-                notification.create_alert(
-                    title="Quotation Request",
-                    message=f"Customer '{user_display}' requested a quotation.\n\n"
-                           f"Customer: {personalized_greeting}\n"
-                           f"User ID: {current_user.User_Id}",
-                    requestor_user_id=current_user.User_Id,
-                    requestor_name=user_display,
-                    db=db2
+                from . import notification
+                from app.database import SessionLocal
+                
+                db2 = SessionLocal()
+                try:
+                    notification.create_alert(
+                        title="Quotation Request",
+                        message=f"Customer '{user_display}' requested a quotation.\n\n"
+                               f"User ID: {current_user.User_Id}",
+                        requestor_user_id=current_user.User_Id,
+                        requestor_name=user_display,
+                        db=db2
+                    )
+                finally:
+                    db2.close()
+            except Exception as e:
+                print(f"Failed to send notification: {e}")
+            
+            if available_products:
+                products_list = "\n".join([f"• {p.ProductName} (ID: {p.PID})" for p in available_products])
+                template_reply = (
+                    f"Hello {user_display}, I can help you with a quotation.\n\n"
+                    f"**Available Products:**\n{products_list}\n\n"
+                    f"Please provide:\n"
+                    f"1. **Product name or ID** (from the list above)\n"
+                    f"2. **Quantity needed** (in Metric Tons)\n"
+                    f"3. Any special notes (optional)\n\n"
+                    f"I'll generate a quotation with pricing based on the last 2-3 sales for that product."
                 )
-            finally:
-                db2.close()
-        except Exception as e:
-            print(f"Failed to send notification: {e}")
-        
-        template_reply = (
-            f"Hello {user_display}, I can help you with your quotation request.\n\n"
-            f"Please share the following details so our sales team can prepare a quote:\n\n"
-            f"1. Product name or ID\n"
-            f"2. Quantity required\n"
-            f"3. Any specific specifications needed\n\n"
-            f"Our sales team will contact you shortly with a formal quotation."
-        )
+                structured_data = {
+                    "available_products": [
+                        {"pid": p.PID, "name": p.ProductName}
+                        for p in available_products
+                    ]
+                }
+            else:
+                template_reply = (
+                    f"Hello {user_display}, I apologize but we don't have any products available "
+                    f"for quotation at the moment. Please contact our sales team for assistance."
+                )
+                structured_data = {}
 
     # ---------------- ORDER_REQUEST ----------------
     elif intent == Intent.ORDER_REQUEST:
