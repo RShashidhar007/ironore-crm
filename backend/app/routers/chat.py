@@ -571,22 +571,17 @@ def chat(
                 print(f"Failed to send notification: {e}")
             
             if available_products:
-                # Create product buttons
+                # Show list of products as buttons (without quantity)
                 products_list = "\n".join([
-                    f"• **{p.ProductName}** (ID: {p.PID})"
+                    f"• {p.ProductName}"
                     for p in available_products
                 ])
                 
                 template_reply = (
                     f"Hello {user_display}, I can help you generate a quotation!\n\n"
-                    f"**Available Products in Stock:**\n{products_list}\n\n"
-                    f"Please click on a product below to select it, then I'll ask for the quantity."
+                    f"**Available Products:**\n{products_list}\n\n"
+                    f"Please click on a product button below to select it."
                 )
-                
-                # Create action buttons for each product
-                action_buttons = [
-                    f"📦 {p.ProductName[:30]}" for p in available_products[:5]  # Limit to 5 buttons
-                ]
                 
                 structured_data = {
                     "products": [
