@@ -882,7 +882,7 @@ def chat(
                         )
                     elif all_workflow_complete:
                         # Status 2: Will be resolved in 2-3 working days (ALL workflow fields filled)
-                        # Auto-generate solution if not already generated
+                        # Generate and save solution if not already generated
                         if not complaint.Solution or not complaint.Solution.strip():
                             # Generate solution with Ollama
                             verified_data_parts = [
@@ -911,10 +911,9 @@ def chat(
                             # Generate solution with Ollama
                             generated_solution = ollama_client.generate_reply(customer_message, verified_data_str)
                             
-                            # Save the generated solution
+                            # Save the generated solution to database
                             if generated_solution:
                                 complaint.Solution = generated_solution
-                                complaint.Status = "Resolved"
                                 complaint.UpdatedDate = datetime.now()
                                 complaint.UpdatedBy = "System"
                                 db.commit()
@@ -1004,7 +1003,7 @@ def chat(
                     elif all_workflow_complete:
                         overall_status = "In Progress"
                         
-                        # Auto-generate solution if not already generated
+                        # Generate and save solution if not already generated
                         if not recent_complaint.Solution or not recent_complaint.Solution.strip():
                             # Generate solution with Ollama
                             verified_data_parts = [
@@ -1033,10 +1032,9 @@ def chat(
                             # Generate solution with Ollama
                             generated_solution = ollama_client.generate_reply(customer_message, verified_data_str)
                             
-                            # Save the generated solution
+                            # Save the generated solution to database
                             if generated_solution:
                                 recent_complaint.Solution = generated_solution
-                                recent_complaint.Status = "Resolved"
                                 recent_complaint.UpdatedDate = datetime.now()
                                 recent_complaint.UpdatedBy = "System"
                                 db.commit()
