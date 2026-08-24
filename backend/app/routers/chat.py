@@ -351,9 +351,74 @@ def chat(
 
     # ---------------- QUOTATION_REQUEST ----------------
     elif intent == Intent.QUOTATION_REQUEST:
-        # Check if this is a quotation request with product and quantity
-        if payload.action and payload.action.startswith("generate_quotation:"):
-            # Parse action: generate_quotation:PID:quantity:notes
+        # Handle product selection (select_product_quotation:INDEX)
+        if payload.action and payload.action.startswith("select_product_quotation:"):
+            product_index = payload.action.replace("select_product_quotation:", "").strip()
+            
+            try:
+                index = int(product_index)
+                
+                # Get available products again
+                all_products = db.query(ProductMaster).all()
+                available_products = []
+                
+                for product in all_products:
+                    produced = db.query(func.sum(InventoryMaster.QuantityMT)).filter(
+                        InventoryMaster.PID == product.PID,
+                        InventoryMaster.Category == 'Produced'
+                    ).scalar() or 0
+                    
+                    sold = db.query(func.sum(InventoryMaster.QuantityMT)).filter(
+                        InventoryMaster.PID == product.PID,
+                        InventoryMaster.Category == 'Sold'
+                    ).scalar() or 0
+                    
+                    available = float(produced) - float(sold)
+                    if available > 0:
+                        available_products.append(product)
+                
+                if index < len(available_products):
+                    selected_product = available_products[index]
+                    
+                    # Calculate available quantity
+                    produced = db.query(func.sum(InventoryMaster.QuantityMT)).filter(
+                        InventoryMaster.PID == selected_product.PID,
+                        InventoryMaster.Category == 'Produced'
+                    ).scalar() or 0
+                    
+                    sold = db.query(func.sum(InventoryMaster.QuantityMT)).filter(
+                        InventoryMaster.PID == selected_product.PID,
+                        InventoryMaster.Category == 'Sold'
+                    ).scalar() or 0
+                    
+                    available_qty = float(produced) - float(sold)
+                    
+                    template_reply = (
+                        f"Great! You selected **{selected_product.ProductName}**\n\n"
+                        f"**Available Stock:** {available_qty:,.2f} MT\n\n"
+                        f"Please enter the quantity you need (in MT):\n"
+                        f"*Example: 50 or 100.5*"
+                    )
+                    
+                    verified_data = f"Product selected: {selected_product.PID}"
+                    structured_data = {
+                        "product_id": selected_product.PID,
+                        "product_name": selected_product.ProductName,
+                        "available_quantity": available_qty,
+                        "status": "awaiting_quantity"
+                    }
+                else:
+                    template_reply = "Invalid product selection. Please try again."
+                    verified_data = "Invalid product index"
+                    structured_data = {}
+                    
+            except ValueError:
+                template_reply = "Invalid selection format. Please try again."
+                verified_data = "Invalid product selection format"
+                structured_data = {}
+        
+        # Handle quantity submission (submit_quantity_quotation:PID:QUANTITY)
+        elif payload.action and payload.action.startswith("submit_quantity_quotation:"):
             parts = payload.action.split(":")
             if len(parts) >= 3:
                 product_pid = parts[1]
@@ -361,69 +426,103 @@ def chat(
                     requested_quantity = float(parts[2])
                     notes = ":".join(parts[3:]) if len(parts) > 3 else ""
                 except (ValueError, IndexError):
-                    template_reply = "Invalid quantity format. Please provide a valid number."
-                    verified_data = "Invalid quotation request format"
+                    template_reply = "Invalid quantity. Please enter a valid number."
+                    verified_data = "Invalid quantity format"
                     structured_data = {}
                 else:
-                    # Find product
-                    product = db.query(ProductMaster).filter(ProductMaster.PID == product_pid).first()
-                    if not product:
-                        template_reply = f"Product {product_pid} not found. Please check the product ID and try again."
-                        verified_data = f"Product not found: {product_pid}"
+                    if requested_quantity <= 0:
+                        template_reply = "Quantity must be greater than 0. Please try again."
+                        verified_data = "Invalid quantity: must be > 0"
                         structured_data = {}
                     else:
-                        try:
-                            from ..quotation_service import (
-                                create_quotation,
-                                get_price_history,
-                                format_quotation_text
-                            )
-                            
-                            # Create quotation
-                            quotation = create_quotation(
-                                db=db,
-                                customer_id=current_user.CID,
-                                product_id=product_pid,
-                                product_name=product.ProductName,
-                                quantity_mt=requested_quantity,
-                                created_by=current_user.User_Id,
-                                validity_days=7,
-                                notes=notes
-                            )
-                            
-                            # Get price history
-                            price_history = get_price_history(db, product_pid, limit=3)
-                            
-                            # Format response
-                            template_reply = format_quotation_text(
-                                quotation_number=quotation.QuotationNumber,
-                                product_name=product.ProductName,
-                                quantity_mt=requested_quantity,
-                                price_per_mt=quotation.PricePerMT,
-                                total_amount=quotation.TotalAmount,
-                                price_history=price_history,
-                                validity_days=7
-                            )
-                            
-                            verified_data = f"Quotation created: {quotation.QuotationNumber}"
-                            structured_data = {
-                                "quotation_id": quotation.QuotationID,
-                                "quotation_number": quotation.QuotationNumber,
-                                "product_id": product_pid,
-                                "quantity_mt": requested_quantity,
-                                "price_per_mt": quotation.PricePerMT,
-                                "total_amount": quotation.TotalAmount,
-                                "pdf_path": quotation.PDFFilePath
-                            }
-                        except Exception as e:
-                            template_reply = f"Error generating quotation: {str(e)}"
-                            verified_data = f"Quotation generation failed: {str(e)}"
+                        # Find product
+                        product = db.query(ProductMaster).filter(ProductMaster.PID == product_pid).first()
+                        if not product:
+                            template_reply = "Product not found. Please start again."
+                            verified_data = f"Product not found: {product_pid}"
                             structured_data = {}
+                        else:
+                            # Check available quantity
+                            produced = db.query(func.sum(InventoryMaster.QuantityMT)).filter(
+                                InventoryMaster.PID == product_pid,
+                                InventoryMaster.Category == 'Produced'
+                            ).scalar() or 0
+                            
+                            sold = db.query(func.sum(InventoryMaster.QuantityMT)).filter(
+                                InventoryMaster.PID == product_pid,
+                                InventoryMaster.Category == 'Sold'
+                            ).scalar() or 0
+                            
+                            available_qty = float(produced) - float(sold)
+                            
+                            if requested_quantity > available_qty:
+                                template_reply = (
+                                    f"Only {available_qty:,.2f} MT available, but you requested {requested_quantity:,.2f} MT.\n\n"
+                                    f"Would you like to order {available_qty:,.2f} MT instead?"
+                                )
+                                verified_data = f"Insufficient inventory"
+                                structured_data = {
+                                    "product_id": product_pid,
+                                    "requested_quantity": requested_quantity,
+                                    "available_quantity": available_qty,
+                                    "status": "insufficient_quantity"
+                                }
+                            else:
+                                # Generate quotation
+                                try:
+                                    from ..quotation_service import (
+                                        create_quotation,
+                                        get_price_history,
+                                        format_quotation_text
+                                    )
+                                    
+                                    # Create quotation
+                                    quotation = create_quotation(
+                                        db=db,
+                                        customer_id=current_user.CID,
+                                        product_id=product_pid,
+                                        product_name=product.ProductName,
+                                        quantity_mt=requested_quantity,
+                                        created_by=current_user.User_Id,
+                                        validity_days=7,
+                                        notes=notes
+                                    )
+                                    
+                                    # Get price history
+                                    price_history = get_price_history(db, product_pid, limit=3)
+                                    
+                                    # Format response
+                                    template_reply = format_quotation_text(
+                                        quotation_number=quotation.QuotationNumber,
+                                        product_name=product.ProductName,
+                                        quantity_mt=requested_quantity,
+                                        price_per_mt=quotation.PricePerMT,
+                                        total_amount=quotation.TotalAmount,
+                                        price_history=price_history,
+                                        validity_days=7
+                                    )
+                                    
+                                    verified_data = f"Quotation created: {quotation.QuotationNumber}"
+                                    structured_data = {
+                                        "quotation_id": quotation.QuotationID,
+                                        "quotation_number": quotation.QuotationNumber,
+                                        "product_id": product_pid,
+                                        "quantity_mt": requested_quantity,
+                                        "price_per_mt": quotation.PricePerMT,
+                                        "total_amount": quotation.TotalAmount,
+                                        "pdf_path": quotation.PDFFilePath,
+                                        "status": "quotation_generated"
+                                    }
+                                except Exception as e:
+                                    template_reply = f"Error generating quotation: {str(e)}"
+                                    verified_data = f"Quotation generation failed"
+                                    structured_data = {}
+        
+        # Initial quotation request - show available products from inventory
         else:
-            # Initial quotation request - ask for product and quantity
             verified_data = "Quotation system ready"
             
-            # Get available products
+            # Get all products with their inventory information
             all_products = db.query(ProductMaster).all()
             available_products = []
             
@@ -445,7 +544,7 @@ def chat(
                 
                 available = float(produced) - float(sold)
                 
-                # Only include if available
+                # Include all products with availability info
                 if available > 0:
                     available_products.append(product)
             
@@ -472,21 +571,29 @@ def chat(
                 print(f"Failed to send notification: {e}")
             
             if available_products:
-                products_list = "\n".join([f"• {p.ProductName} (ID: {p.PID})" for p in available_products])
+                # Create product buttons
+                products_list = "\n".join([
+                    f"• **{p.ProductName}** (ID: {p.PID})"
+                    for p in available_products
+                ])
+                
                 template_reply = (
-                    f"Hello {user_display}, I can help you with a quotation.\n\n"
-                    f"**Available Products:**\n{products_list}\n\n"
-                    f"Please provide:\n"
-                    f"1. **Product name or ID** (from the list above)\n"
-                    f"2. **Quantity needed** (in Metric Tons)\n"
-                    f"3. Any special notes (optional)\n\n"
-                    f"I'll generate a quotation with pricing based on the last 2-3 sales for that product."
+                    f"Hello {user_display}, I can help you generate a quotation!\n\n"
+                    f"**Available Products in Stock:**\n{products_list}\n\n"
+                    f"Please click on a product below to select it, then I'll ask for the quantity."
                 )
+                
+                # Create action buttons for each product
+                action_buttons = [
+                    f"📦 {p.ProductName[:30]}" for p in available_products[:5]  # Limit to 5 buttons
+                ]
+                
                 structured_data = {
-                    "available_products": [
-                        {"pid": p.PID, "name": p.ProductName}
-                        for p in available_products
-                    ]
+                    "products": [
+                        {"pid": p.PID, "name": p.ProductName, "id": i}
+                        for i, p in enumerate(available_products)
+                    ],
+                    "status": "awaiting_product_selection"
                 }
             else:
                 template_reply = (
