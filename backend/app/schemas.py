@@ -124,6 +124,13 @@ class ComplaintOut(BaseModel):
     ComplaintDescription: Optional[str] = None
     PONumber: Optional[str] = None
     DispatchDate: Optional[date] = None
+    RootCauseAnalysis: Optional[str] = None
+    CorrectivePreventiveAction: Optional[str] = None
+    MarketingReview: Optional[str] = None
+    MarketingReviewDate: Optional[date] = None
+    PlantHeadReview: Optional[str] = None
+    PlantHeadReviewDate: Optional[date] = None
+    HODReview: Optional[str] = None
     Solution: Optional[str] = None
     Status: Optional[str] = None
     CreatedBy: Optional[str] = None
@@ -132,6 +139,19 @@ class ComplaintOut(BaseModel):
     UpdatedDate: Optional[date] = None
 
     model_config = {"from_attributes": True}
+
+
+class ComplaintReviewIn(BaseModel):
+    complaint_id: str
+    review_type: str  # "marketing", "plant_head", or "hod"
+    approval_status: str  # "approved", "rejected", or "under_review"
+    review_comments: Optional[str] = None  # Comments from the reviewer
+
+
+class ComplaintSolutionGenerateIn(BaseModel):
+    complaint_id: str
+    root_cause_analysis: str
+    corrective_preventive_action: str
 
 
 class NotificationOut(BaseModel):

@@ -137,9 +137,9 @@ class ComplaintMaster(Base):
     RootCauseAnalysisDate = Column(DateTime)
     CorrectivePreventiveAction = Column(String(2000))
     CorrectivePreventiveActionDate = Column(DateTime)
-    MarketingReview = Column(String(100))
+    MarketingReview = Column(String(1000))  # Stores "approved"/"rejected"/"under_review" or review comments
     MarketingReviewDate = Column(DateTime)
-    PlantHeadReview = Column(String(100))
+    PlantHeadReview = Column(String(1000))  # Stores "approved"/"rejected"/"under_review" or review comments
     PlantHeadReviewDate = Column(DateTime)
     HODReview = Column(String(100))
     HODReviewDate = Column(DateTime)
