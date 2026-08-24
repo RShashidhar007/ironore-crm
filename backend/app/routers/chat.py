@@ -19,7 +19,7 @@ from ..models import (
 )
 from ..schemas import ChatRequest, ChatResponse, ComplaintIn, ComplaintOut
 from ..auth import get_current_user
-from ..config import settings
+from ..config import settings, get_company_email, get_company_phone, get_company_whatsapp
 from .. import ollama_client
 from ..intent import (
     Intent,
@@ -57,6 +57,7 @@ ACTION_TO_INTENT = {
     "Product Information": Intent.PRODUCT_INFORMATION,
     "Raise a Complaint": Intent.COMPLAINT,
     "Track my Complaint": Intent.COMPLAINT_TRACKING,
+    "Connect to Company": Intent.WHATSAPP_CONTACT,
     "Contact Company via Email": Intent.WHATSAPP_CONTACT,
 }
 
@@ -811,7 +812,7 @@ def chat(
         template_reply = (
             f"Hello {user_display}, I'm sorry but order tracking is not yet available in our database.\n\n"
             f"Our admin team has been notified about your request. Please contact our sales team "
-            f"for the status of your order, or use WhatsApp at {settings.COMPANY_WHATSAPP_NUMBER} "
+            f"for the status of your order, or use WhatsApp at {get_company_whatsapp()} "
             f"for faster assistance."
         )
 
@@ -1191,11 +1192,23 @@ def chat(
 
     # ---------------- WHATSAPP_CONTACT ----------------
     elif intent == Intent.WHATSAPP_CONTACT:
-        if settings.COMPANY_SUPPORT_EMAIL:
-            structured_data = {"email": settings.COMPANY_SUPPORT_EMAIL}
-            verified_data = f"Email: {settings.COMPANY_SUPPORT_EMAIL}"
+        company_email = get_company_email()
+        # Get the logged-in customer's name
+        customer_name = None
+        if current_user.CID:
+            customer = db.query(CustomerDetail).filter(CustomerDetail.CID == current_user.CID).first()
+            if customer:
+                customer_name = customer.CustomerName
+        
+        # Fallback to user name if no customer record
+        if not customer_name:
+            customer_name = current_user.User_Name or current_user.User_Id
+        
+        if company_email:
+            structured_data = {"email": company_email, "customerName": customer_name}
+            verified_data = f"Email: {company_email}, Customer: {customer_name}"
             # Format email as a mailto link that frontend can render as clickable
-            template_reply = f"You can reach us by email at [**{settings.COMPANY_SUPPORT_EMAIL}**](mailto:{settings.COMPANY_SUPPORT_EMAIL})\n\nClick the email address to send us a message."
+            template_reply = f"Hello {customer_name}! You can reach us by email at [**{company_email}**](mailto:{company_email})\n\nClick the email address to send us a message."
         else:
             verified_data = "Email not configured."
             template_reply = "Our email contact isn't configured yet. Please check back soon or ask for human support."
@@ -1203,10 +1216,12 @@ def chat(
     # ---------------- HUMAN_SUPPORT ----------------
     elif intent == Intent.HUMAN_SUPPORT:
         contacts = []
-        if settings.COMPANY_SUPPORT_EMAIL:
-            contacts.append(f"email at {settings.COMPANY_SUPPORT_EMAIL}")
-        if settings.COMPANY_SUPPORT_PHONE:
-            contacts.append(f"phone at {settings.COMPANY_SUPPORT_PHONE}")
+        company_email = get_company_email()
+        company_phone = get_company_phone()
+        if company_email:
+            contacts.append(f"email at {company_email}")
+        if company_phone:
+            contacts.append(f"phone at {company_phone}")
         if current_user.ResponsibleSeller:
             contacts.append(f"your account manager, {current_user.ResponsibleSeller}")
         verified_data = "; ".join(contacts) or "No support contact configured."
@@ -1240,7 +1255,7 @@ def chat(
         template_reply = (
             f"{greeting_prefix}! I can help with customer information, "
             f"products, Iron Ore specifications, Iron Pellet specifications, and quotation, "
-            f"order, or complaint requests. You can also contact us via email at {settings.COMPANY_SUPPORT_EMAIL}. What would you like to know?"
+            f"order, or complaint requests. You can also contact us via email at {get_company_email()}. What would you like to know?"
         )
 
     # ---------------- UNKNOWN ----------------
@@ -1297,8 +1312,8 @@ def chat(
             f"Our admin team has been notified and will review your request. They may contact you "
             f"for additional details.\n\n"
             f"If you need immediate assistance, please contact us via WhatsApp at "
-            f"{settings.COMPANY_WHATSAPP_NUMBER or 'the support number'} or email at "
-            f"{settings.COMPANY_SUPPORT_EMAIL or 'support@company.com'}.\n\n"
+            f"{get_company_whatsapp() or 'the support number'} or email at "
+            f"{get_company_email() or 'support@company.com'}.\n\n"
             f"Best regards,\nCRM Bot Team"
         )
 

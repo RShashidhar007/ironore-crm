@@ -132,7 +132,8 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
         orderProducts: isOrderResponse && res.data ? res.data : [],
         showQuotationProducts: isQuotationResponse && res.data && res.data.products ? true : false,
         quotationProducts: isQuotationResponse && res.data && res.data.products ? res.data.products : [],
-        companyEmail: isConnectResponse && res.data ? res.data.email : null
+        companyEmail: isConnectResponse && res.data ? res.data.email : null,
+        customerName: isConnectResponse && res.data ? res.data.customerName : null
       }])
     } catch (err) {
       const msg = err instanceof ApiError
@@ -456,6 +457,7 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
                 onQuotationQuantityChange={(value) => setQuotationDetails({ ...quotationDetails, quantity: value })}
                 onSubmitQuotation={submitQuotation}
                 companyEmail={m.companyEmail || null}
+                customerName={m.customerName || null}
               />
             ))}
             {loading && (

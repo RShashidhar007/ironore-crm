@@ -7,6 +7,7 @@ backend/ directory). Nothing sensitive is hard-coded here.
 import os
 from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -76,6 +77,38 @@ class Settings(BaseSettings):
                     f"&TrustServerCertificate={self.MSSQL_TRUST_SERVER_CERT}"
                 )
         return f"sqlite:///{self.SQLITE_PATH}"
+
+
+def get_company_email() -> str:
+    """
+    Dynamically fetch company email from .env file at runtime.
+    This allows changes to the .env file to be reflected immediately
+    without restarting the backend.
+    """
+    env_path = BASE_DIR / ".env"
+    if env_path.exists():
+        load_dotenv(env_path, override=True)
+    return os.getenv("COMPANY_SUPPORT_EMAIL", "")
+
+
+def get_company_phone() -> str:
+    """
+    Dynamically fetch company phone from .env file at runtime.
+    """
+    env_path = BASE_DIR / ".env"
+    if env_path.exists():
+        load_dotenv(env_path, override=True)
+    return os.getenv("COMPANY_SUPPORT_PHONE", "")
+
+
+def get_company_whatsapp() -> str:
+    """
+    Dynamically fetch company WhatsApp from .env file at runtime.
+    """
+    env_path = BASE_DIR / ".env"
+    if env_path.exists():
+        load_dotenv(env_path, override=True)
+    return os.getenv("COMPANY_WHATSAPP_NUMBER", "")
 
 
 settings = Settings()

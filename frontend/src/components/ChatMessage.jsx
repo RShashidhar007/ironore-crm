@@ -39,6 +39,7 @@ export default function ChatMessage({
   onQuotationQuantityChange,
   onSubmitQuotation,
   companyEmail,
+  customerName,
 }) {
   const isUser = role === 'user'
   
@@ -436,8 +437,15 @@ export default function ChatMessage({
             <p style={{ marginTop: 0, marginBottom: '12px', fontWeight: 'bold', color: '#c4622d' }}>
               📧 Contact Us
             </p>
+            {customerName && (
+              <p style={{ marginTop: 0, marginBottom: '12px', fontSize: '14px', color: 'var(--text)' }}>
+                Hello <strong>{customerName}</strong>! Reach out to us via email:
+              </p>
+            )}
             <a 
-              href={`mailto:${companyEmail}`}
+              href={`https://mail.google.com/mail/?view=cm&fs=1&to=${companyEmail}`}
+              target="_blank"
+              rel="noopener noreferrer"
               style={{
                 display: 'inline-block',
                 background: 'var(--accent-ore)',
@@ -459,10 +467,10 @@ export default function ChatMessage({
                 e.target.style.boxShadow = 'none'
               }}
             >
-              ✉️ Send Email to {companyEmail}
+              ✉️ Open Gmail to Send Email
             </a>
             <p style={{ marginTop: '10px', marginBottom: 0, fontSize: '12px', color: 'var(--text-dim)' }}>
-              Click the button above to open your email client and send us a message.
+              Click the button above to open Gmail and send us a message.
             </p>
           </div>
         )}
