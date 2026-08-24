@@ -4,7 +4,7 @@ from typing import Optional
 
 from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
-from sqlalchemy import or_
+from sqlalchemy import or_, func
 
 from ..database import get_db
 from ..models import (
@@ -15,6 +15,7 @@ from ..models import (
     IronPelletSpecificationMaster,
     ComplaintMaster,
     LoginMaster,
+    InventoryMaster,
 )
 from ..schemas import ChatRequest, ChatResponse, ComplaintIn, ComplaintOut
 from ..auth import get_current_user
@@ -140,6 +141,8 @@ def chat(
     if payload.action:
         if payload.action.startswith("view_complaint:"):
             intent = Intent.COMPLAINT_TRACKING
+        elif payload.action.startswith("order_quantity:"):
+            intent = Intent.ORDER_REQUEST
         elif payload.action in ACTION_TO_INTENT:
             intent = ACTION_TO_INTENT[payload.action]
         else:
@@ -386,50 +389,188 @@ def chat(
 
     # ---------------- ORDER_REQUEST ----------------
     elif intent == Intent.ORDER_REQUEST:
-        verified_data = "Order table does not exist yet."
-        
-        # Get personalized greeting
-        customer_company = None
-        if current_user.CID:
-            customer = db.query(CustomerDetail).filter(CustomerDetail.CID == current_user.CID).first()
-            if customer:
-                customer_company = customer.CustomerName
-        user_display = current_user.User_Name or current_user.User_Id
-        if customer_company:
-            personalized_greeting = f"{user_display} from {customer_company}"
+        # Check if this is a quantity validation request (order_quantity:PID:quantity)
+        if payload.action and payload.action.startswith("order_quantity:"):
+            parts = payload.action.split(":")
+            if len(parts) == 3:
+                product_pid = parts[1]
+                try:
+                    requested_quantity = float(parts[2])
+                except (ValueError, TypeError):
+                    requested_quantity = 0
+                
+                # Calculate available quantity for this product (Produced - Sold)
+                produced = db.query(
+                    func.sum(InventoryMaster.QuantityMT)
+                ).filter(
+                    InventoryMaster.PID == product_pid,
+                    InventoryMaster.Category == 'Produced'
+                ).scalar() or 0
+                
+                sold = db.query(
+                    func.sum(InventoryMaster.QuantityMT)
+                ).filter(
+                    InventoryMaster.PID == product_pid,
+                    InventoryMaster.Category == 'Sold'
+                ).scalar() or 0
+                
+                available_qty = float(produced) - float(sold)
+                
+                if available_qty > 0:
+                    if requested_quantity <= available_qty:
+                        # Quantity is available - create "Sold" entry to deduct from inventory
+                        today = datetime.now().date()
+                        
+                        # Get the product to get price information
+                        product = db.query(ProductMaster).filter(ProductMaster.PID == product_pid).first()
+                        
+                        # Get latest produced entry for this product
+                        latest_produced = db.query(InventoryMaster).filter(
+                            InventoryMaster.PID == product_pid,
+                            InventoryMaster.Category == 'Produced'
+                        ).order_by(InventoryMaster.InventoryID.desc()).first()
+                        
+                        selling_price = latest_produced.SellingPrice if latest_produced else None
+                        initial_price = latest_produced.InitialPrice if latest_produced else None
+                        
+                        # Create "Sold" inventory entry
+                        sold_entry = InventoryMaster(
+                            PID=product_pid,
+                            Category='Sold',
+                            QuantityMT=requested_quantity,
+                            ProducedDate=today,
+                            InitialPrice=initial_price,
+                            SellingPrice=selling_price
+                        )
+                        db.add(sold_entry)
+                        db.commit()
+                        
+                        # Quantity is available
+                        remaining = available_qty - requested_quantity
+                        verified_data = f"Order accepted for {product_pid}: {requested_quantity} MT sold, {remaining} MT remaining"
+                        template_reply = (
+                            f"Great! We have {available_qty} MT available.\n\n"
+                            f"You requested {requested_quantity} MT - this quantity is available.\n\n"
+                            f"Your order has been accepted. A company executive will contact you shortly for price negotiations.\n\n"
+                            f"Thank you for your order!"
+                        )
+                        structured_data = {
+                            "order_status": "accepted",
+                            "product_pid": product_pid,
+                            "requested_quantity": requested_quantity,
+                            "available_quantity": available_qty,
+                            "remaining_quantity": remaining
+                        }
+                    else:
+                        # Quantity not fully available
+                        verified_data = f"Insufficient inventory for {product_pid}: requested {requested_quantity}, available {available_qty}"
+                        template_reply = (
+                            f"I see that you requested {requested_quantity} MT, but we only have {available_qty} MT available.\n\n"
+                            f"Would you like to:\n"
+                            f"1. Proceed with {available_qty} MT instead?\n"
+                            f"2. Reduce your quantity to what's available?\n"
+                            f"3. Wait for restocking (contact our sales team for estimated delivery)?\n\n"
+                            f"Please let me know how you'd like to proceed."
+                        )
+                        structured_data = {
+                            "order_status": "insufficient_quantity",
+                            "product_pid": product_pid,
+                            "requested_quantity": requested_quantity,
+                            "available_quantity": available_qty
+                        }
+                else:
+                    # No inventory found
+                    verified_data = f"No inventory record for product {product_pid}"
+                    template_reply = (
+                        f"Unfortunately, this product is currently out of stock.\n\n"
+                        f"Please contact our sales team for availability and estimated restocking date."
+                    )
+                    structured_data = {
+                        "order_status": "out_of_stock",
+                        "product_pid": product_pid
+                    }
         else:
-            personalized_greeting = user_display
-        
-        # Send admin notification
-        try:
-            from . import notification
-            from app.database import SessionLocal
+            # Regular order request - show available products
+            verified_data = "pending category selection"
             
-            db2 = SessionLocal()
+            # Get personalized greeting
+            customer_company = None
+            if current_user.CID:
+                customer = db.query(CustomerDetail).filter(CustomerDetail.CID == current_user.CID).first()
+                if customer:
+                    customer_company = customer.CustomerName
+            user_display = current_user.User_Name or current_user.User_Id
+            if customer_company:
+                personalized_greeting = f"{user_display} from {customer_company}"
+            else:
+                personalized_greeting = user_display
+            
+            # Fetch products that have available inventory (QuantityMT > 0)
+            # Calculate available as (Produced - Sold)
+            
+            # Get all products
+            all_products = db.query(ProductMaster).all()
+            available_products = []
+            
+            for product in all_products:
+                # Calculate available for each product
+                produced = db.query(
+                    func.sum(InventoryMaster.QuantityMT)
+                ).filter(
+                    InventoryMaster.PID == product.PID,
+                    InventoryMaster.Category == 'Produced'
+                ).scalar() or 0
+                
+                sold = db.query(
+                    func.sum(InventoryMaster.QuantityMT)
+                ).filter(
+                    InventoryMaster.PID == product.PID,
+                    InventoryMaster.Category == 'Sold'
+                ).scalar() or 0
+                
+                available = float(produced) - float(sold)
+                
+                # Only include if available
+                if available > 0:
+                    available_products.append(product)
+            
+            structured_data = [
+                {"PID": p.PID, "name": p.ProductName,
+                 "category": _get_product_category(db, p),
+                 "status": p.PStatus}
+                for p in available_products
+            ]
+            
+            # Send admin notification
             try:
-                notification.create_alert(
-                    title="Order Request",
-                    message=f"Customer '{user_display}' wants to place an order.\n\n"
-                           f"Customer: {personalized_greeting}\n"
-                           f"User ID: {current_user.User_Id}",
-                    requestor_user_id=current_user.User_Id,
-                    requestor_name=user_display,
-                    db=db2
+                from . import notification
+                from app.database import SessionLocal
+                
+                db2 = SessionLocal()
+                try:
+                    notification.create_alert(
+                        title="Order Request",
+                        message=f"Customer '{user_display}' wants to place an order.\n\n"
+                               f"Customer: {personalized_greeting}\n"
+                               f"User ID: {current_user.User_Id}",
+                        requestor_user_id=current_user.User_Id,
+                        requestor_name=user_display,
+                        db=db2
+                    )
+                finally:
+                    db2.close()
+            except Exception as e:
+                print(f"Failed to send notification: {e}")
+            
+            if available_products:
+                template_reply = (
+                    f"Hello {user_display}, I can help you place an order."
                 )
-            finally:
-                db2.close()
-        except Exception as e:
-            print(f"Failed to send notification: {e}")
-        
-        template_reply = (
-            f"Hello {user_display}, I can help you with your order.\n\n"
-            f"Please share the following details so our sales team can process your order:\n\n"
-            f"1. Product name or ID\n"
-            f"2. Quantity required\n"
-            f"3. Delivery location\n"
-            f"4. Any specific requirements\n\n"
-            f"Our sales team will contact you shortly to confirm the order."
-        )
+            else:
+                template_reply = (
+                    f"Hello {user_display}, I apologize but we don't have any products available at the moment. "
+                    f"Please contact our sales team for assistance."
+                )
 
     # ---------------- ORDER_TRACKING ----------------
     elif intent == Intent.ORDER_TRACKING:
@@ -491,160 +632,98 @@ def chat(
                         f"Please verify the complaint ID and try again."
                     )
                 else:
-                    # First check if Status is already "Resolved"
-                    if complaint.Status == "Resolved" and complaint.Solution and complaint.Solution.strip():
-                        # Status is Resolved - just show the solution with greeting
+                    # Check if ALL workflow columns have data
+                    has_root_cause = complaint.RootCauseAnalysis and complaint.RootCauseAnalysis.strip()
+                    has_root_cause_date = complaint.RootCauseAnalysisDate
+                    has_corrective_action = complaint.CorrectivePreventiveAction and complaint.CorrectivePreventiveAction.strip()
+                    has_corrective_date = complaint.CorrectivePreventiveActionDate
+                    has_marketing_review = complaint.MarketingReview and complaint.MarketingReview.strip()
+                    has_marketing_date = complaint.MarketingReviewDate
+                    has_plant_head_review = complaint.PlantHeadReview and complaint.PlantHeadReview.strip()
+                    has_plant_head_date = complaint.PlantHeadReviewDate
+                    
+                    # Check if main workflow columns are filled (don't require HOD)
+                    main_workflow_complete = (
+                        has_root_cause and has_root_cause_date and
+                        has_corrective_action and has_corrective_date and
+                        has_marketing_review and has_marketing_date and
+                        has_plant_head_review and has_plant_head_date
+                    )
+                    
+                    # Determine status and show only status to customer
+                    if complaint.Status == "Resolved":
+                        # Status 3: Resolved
                         overall_status = "Resolved"
                         verified_data = f"Complaint {complaint_id} resolved"
                         template_reply = (
-                            f"Dear {current_user.User_Name},\n\n"
-                            f"Thank you for reaching out to us regarding your concern. We have reviewed the information you provided and are pleased to inform you that your complaint has been resolved.\n\n"
-                            f"{complaint.Solution}"
+                            f"Hello {current_user.User_Name},\n\n"
+                            f"**Complaint ID:** {complaint.ComplaintID}\n"
+                            f"**Status:** ✅ Resolved\n\n"
+                            f"Your complaint has been resolved. Thank you for your patience."
+                        )
+                    elif main_workflow_complete:
+                        # Status 2: Will be resolved in 2-3 working days
+                        # Auto-generate solution if not already generated
+                        if not complaint.Solution or not complaint.Solution.strip():
+                            # Generate solution with Ollama
+                            verified_data_parts = [
+                                f"Complaint Category: {complaint.CategoryType}",
+                                f"Customer Issue: {complaint.ComplaintDescription}",
+                                f"\nRoot Cause Analysis: {complaint.RootCauseAnalysis}",
+                                f"Analyzed On: {complaint.RootCauseAnalysisDate.strftime('%B %d, %Y') if complaint.RootCauseAnalysisDate else 'N/A'}",
+                                f"\nCorrective/Preventive Action: {complaint.CorrectivePreventiveAction}",
+                                f"Action Date: {complaint.CorrectivePreventiveActionDate.strftime('%B %d, %Y') if complaint.CorrectivePreventiveActionDate else 'N/A'}",
+                                f"\nMarketing Review: {complaint.MarketingReview}",
+                                f"Marketing Review Date: {complaint.MarketingReviewDate.strftime('%B %d, %Y') if complaint.MarketingReviewDate else 'N/A'}",
+                                f"\nPlant Head Review: {complaint.PlantHeadReview}",
+                                f"Plant Head Review Date: {complaint.PlantHeadReviewDate.strftime('%B %d, %Y') if complaint.PlantHeadReviewDate else 'N/A'}",
+                            ]
+                            
+                            verified_data_str = "\n".join(verified_data_parts)
+                            
+                            # Prompt for Ollama to generate solution
+                            customer_message = (
+                                "Based on all the investigation data, root cause analysis, corrective actions taken, "
+                                "and all reviews completed, write a warm and professional solution message for the customer. "
+                                "Explain in simple human language what was the problem, what we found, what we did to fix it, "
+                                "and reassure them that the issue is now resolved. Keep it concise and friendly."
+                            )
+                            
+                            # Generate solution with Ollama
+                            generated_solution = ollama_client.generate_reply(customer_message, verified_data_str)
+                            
+                            # Save the generated solution
+                            if generated_solution:
+                                complaint.Solution = generated_solution
+                                complaint.Status = "Resolved"
+                                complaint.UpdatedDate = datetime.now()
+                                complaint.UpdatedBy = "System"
+                                db.commit()
+                        
+                        overall_status = "In Progress"
+                        verified_data = f"Complaint {complaint_id} in progress - will resolve in 2-3 days"
+                        template_reply = (
+                            f"Hello {current_user.User_Name},\n\n"
+                            f"**Complaint ID:** {complaint.ComplaintID}\n"
+                            f"**Status:** ⏳ Will be resolved in 2-3 working days\n\n"
+                            f"Our team is finalizing the resolution. Thank you for your patience."
                         )
                     else:
-                        # Check if ALL workflow columns have data
-                        has_root_cause = complaint.RootCauseAnalysis and complaint.RootCauseAnalysis.strip()
-                        has_root_cause_date = complaint.RootCauseAnalysisDate
-                        has_corrective_action = complaint.CorrectivePreventiveAction and complaint.CorrectivePreventiveAction.strip()
-                        has_corrective_date = complaint.CorrectivePreventiveActionDate
-                        has_marketing_review = complaint.MarketingReview and complaint.MarketingReview.strip()
-                        has_marketing_date = complaint.MarketingReviewDate
-                        has_plant_head_review = complaint.PlantHeadReview and complaint.PlantHeadReview.strip()
-                        has_plant_head_date = complaint.PlantHeadReviewDate
-                        has_hod_review = complaint.HODReview and complaint.HODReview.strip()
-                        has_hod_date = complaint.HODReviewDate
-                        
-                        # Check if ALL columns are filled
-                        all_columns_complete = (
-                            has_root_cause and has_root_cause_date and
-                            has_corrective_action and has_corrective_date and
-                            has_marketing_review and has_marketing_date and
-                            has_plant_head_review and has_plant_head_date and
-                            has_hod_review and has_hod_date
+                        # Status 1: Under Review
+                        overall_status = "Under Review"
+                        verified_data = f"Complaint {complaint_id} under review"
+                        template_reply = (
+                            f"Hello {current_user.User_Name},\n\n"
+                            f"**Complaint ID:** {complaint.ComplaintID}\n"
+                            f"**Status:** 📝 Under Review\n\n"
+                            f"Your complaint is being investigated. We will update you shortly."
                         )
-                        
-                        # If ALL columns have data
-                        if all_columns_complete:
-                            # Check if solution already exists in database
-                            if complaint.Solution and complaint.Solution.strip():
-                                # Solution exists - update status and show it
-                                complaint.Status = "Resolved"
-                                complaint.UpdatedDate = datetime.now()
-                                complaint.UpdatedBy = "System"
-                                db.commit()
-                                
-                                overall_status = "Resolved"
-                                verified_data = f"Complaint {complaint_id} resolved"
-                                
-                                # Show ONLY the solution from database with greeting
-                                template_reply = (
-                                    f"Dear {current_user.User_Name},\n\n"
-                                    f"Thank you for reaching out to us regarding your concern. We have reviewed the information you provided and are pleased to inform you that your complaint has been resolved.\n\n"
-                                    f"{complaint.Solution}"
-                                )
-                            else:
-                                # No solution yet - generate with Ollama
-                                overall_status = "Resolved"
-                                
-                                # Build comprehensive verified data for Ollama
-                                verified_data_parts = [
-                                    f"Complaint Category: {complaint.CategoryType}",
-                                    f"Customer Issue: {complaint.ComplaintDescription}",
-                                    f"\nRoot Cause Analysis: {complaint.RootCauseAnalysis}",
-                                    f"Analyzed On: {complaint.RootCauseAnalysisDate.strftime('%B %d, %Y') if complaint.RootCauseAnalysisDate else 'N/A'}",
-                                    f"\nCorrective/Preventive Action: {complaint.CorrectivePreventiveAction}",
-                                    f"Action Date: {complaint.CorrectivePreventiveActionDate.strftime('%B %d, %Y') if complaint.CorrectivePreventiveActionDate else 'N/A'}",
-                                    f"\nMarketing Review: {complaint.MarketingReview}",
-                                    f"Marketing Review Date: {complaint.MarketingReviewDate.strftime('%B %d, %Y') if complaint.MarketingReviewDate else 'N/A'}",
-                                    f"\nPlant Head Review: {complaint.PlantHeadReview}",
-                                    f"Plant Head Review Date: {complaint.PlantHeadReviewDate.strftime('%B %d, %Y') if complaint.PlantHeadReviewDate else 'N/A'}",
-                                    f"\nHOD Review: {complaint.HODReview}",
-                                    f"HOD Review Date: {complaint.HODReviewDate.strftime('%B %d, %Y') if complaint.HODReviewDate else 'N/A'}",
-                                ]
-                                
-                                verified_data = "\n".join(verified_data_parts)
-                                
-                                # Prompt for Ollama to generate human-friendly solution
-                                customer_message = (
-                                    "Based on all the investigation data, root cause analysis, corrective actions taken, "
-                                    "and all reviews completed, write a warm and professional solution message for the customer. "
-                                    "Explain in simple human language what was the problem, what we found, what we did to fix it, "
-                                    "and reassure them that the issue is now resolved. Keep it concise and friendly."
-                                )
-                                
-                                # Generate solution with Ollama
-                                ollama_solution = ollama_client.generate_reply(customer_message, verified_data)
-                                
-                                # Save the generated solution to Solution column
-                                complaint.Solution = ollama_solution or (
-                                    f"We identified the root cause and have successfully taken corrective actions. "
-                                    f"All reviews have been completed. Your complaint is now resolved."
-                                )
-                                complaint.Status = "Resolved"
-                                complaint.UpdatedDate = datetime.now()
-                                complaint.UpdatedBy = "System"
-                                db.commit()
-                                
-                                verified_data = f"Complaint {complaint_id} resolved"
-                                
-                                # Show the generated solution with greeting
-                                template_reply = (
-                                    f"Dear {current_user.User_Name},\n\n"
-                                    f"Thank you for reaching out to us regarding your concern. We have reviewed the information you provided and are pleased to inform you that your complaint has been resolved.\n\n"
-                                    f"{complaint.Solution}"
-                                )
-                        
-                        else:
-                            # Not all columns are complete - keep under review
-                            overall_status = "Under Review"
-                            verified_data = f"Complaint {complaint_id} under review - incomplete investigation"
-                            
-                            template_reply = (
-                                f"Hello {current_user.User_Name},\n\n"
-                                f"**Complaint ID:** {complaint.ComplaintID}\n"
-                                f"**Status:** 📝 Under Review\n\n"
-                                f"Your complaint is currently being investigated. Our team is working through the following stages:\n"
-                            )
-                            
-                            if has_root_cause and has_root_cause_date:
-                                template_reply += f"✅ Root cause analysis completed\n"
-                            else:
-                                template_reply += f"⏳ Root cause analysis in progress\n"
-                            
-                            if has_corrective_action and has_corrective_date:
-                                template_reply += f"✅ Corrective actions taken\n"
-                            else:
-                                template_reply += f"⏳ Corrective actions pending\n"
-                            
-                            if has_marketing_review and has_marketing_date:
-                                template_reply += f"✅ Marketing review completed\n"
-                            else:
-                                template_reply += f"⏳ Marketing review pending\n"
-                            
-                            if has_plant_head_review and has_plant_head_date:
-                                template_reply += f"✅ Plant head review completed\n"
-                            else:
-                                template_reply += f"⏳ Plant head review pending\n"
-                            
-                            if has_hod_review and has_hod_date:
-                                template_reply += f"✅ HOD review completed\n"
-                            else:
-                                template_reply += f"⏳ HOD review pending\n"
-                            
-                            template_reply += (
-                                f"\nWe'll notify you as soon as all investigations are complete and the solution is ready. "
-                                f"We appreciate your patience!"
-                            )
-                        
-                        structured_data = {
-                            "complaint_id": complaint.ComplaintID,
-                            "category": complaint.CategoryType,
-                            "description": complaint.ComplaintDescription,
-                            "po_number": complaint.PONumber,
-                            "dispatch_date": complaint.DispatchDate.strftime('%Y-%m-%d') if complaint.DispatchDate else None,
-                            "created_date": complaint.CreatedDate.strftime('%Y-%m-%d') if complaint.CreatedDate else None,
-                            "status": overall_status,
-                        }
+                    
+                    structured_data = {
+                        "complaint_id": complaint.ComplaintID,
+                        "category": complaint.CategoryType,
+                        "status": overall_status,
+                    }
             else:
                 overall_status = "Not Found"
                 verified_data = f"Complaint {complaint_id} not found"
@@ -668,73 +747,93 @@ def chat(
                     # Get the most recent complaint
                     recent_complaint = user_complaints[0]
                     
-                    # Check if Status is "Resolved"
-                    if recent_complaint.Status == "Resolved" and recent_complaint.Solution and recent_complaint.Solution.strip():
-                        # Status is Resolved - show the solution directly with greeting
-                        verified_data = f"Complaint {recent_complaint.ComplaintID} resolved - showing solution"
+                    # Check workflow data to determine status
+                    has_root_cause = recent_complaint.RootCauseAnalysis and recent_complaint.RootCauseAnalysis.strip()
+                    has_root_cause_date = recent_complaint.RootCauseAnalysisDate
+                    has_corrective_action = recent_complaint.CorrectivePreventiveAction and recent_complaint.CorrectivePreventiveAction.strip()
+                    has_corrective_date = recent_complaint.CorrectivePreventiveActionDate
+                    has_marketing_review = recent_complaint.MarketingReview and recent_complaint.MarketingReview.strip()
+                    has_marketing_date = recent_complaint.MarketingReviewDate
+                    has_plant_head_review = recent_complaint.PlantHeadReview and recent_complaint.PlantHeadReview.strip()
+                    has_plant_head_date = recent_complaint.PlantHeadReviewDate
+                    
+                    # Check if main workflow columns are filled
+                    main_workflow_complete = (
+                        has_root_cause and has_root_cause_date and
+                        has_corrective_action and has_corrective_date and
+                        has_marketing_review and has_marketing_date and
+                        has_plant_head_review and has_plant_head_date
+                    )
+                    
+                    # Determine status
+                    if recent_complaint.Status == "Resolved":
+                        overall_status = "Resolved"
                         template_reply = (
-                            f"Dear {current_user.User_Name},\n\n"
-                            f"Thank you for reaching out to us regarding your concern. We have reviewed the information you provided and are pleased to inform you that your complaint has been resolved.\n\n"
-                            f"{recent_complaint.Solution}"
+                            f"Hello {current_user.User_Name},\n\n"
+                            f"**Complaint ID:** {recent_complaint.ComplaintID}\n"
+                            f"**Status:** ✅ Resolved\n\n"
+                            f"Your complaint has been resolved. Thank you for your patience."
                         )
-                    else:
-                        # Show current status with progress
-                        has_root_cause = recent_complaint.RootCauseAnalysis and recent_complaint.RootCauseAnalysis.strip()
-                        has_root_cause_date = recent_complaint.RootCauseAnalysisDate
-                        has_corrective_action = recent_complaint.CorrectivePreventiveAction and recent_complaint.CorrectivePreventiveAction.strip()
-                        has_corrective_date = recent_complaint.CorrectivePreventiveActionDate
-                        has_marketing_review = recent_complaint.MarketingReview and recent_complaint.MarketingReview.strip()
-                        has_marketing_date = recent_complaint.MarketingReviewDate
-                        has_plant_head_review = recent_complaint.PlantHeadReview and recent_complaint.PlantHeadReview.strip()
-                        has_plant_head_date = recent_complaint.PlantHeadReviewDate
-                        has_hod_review = recent_complaint.HODReview and recent_complaint.HODReview.strip()
-                        has_hod_date = recent_complaint.HODReviewDate
+                    elif main_workflow_complete:
+                        overall_status = "In Progress"
                         
-                        overall_status = "Under Review"
-                        verified_data = f"Complaint {recent_complaint.ComplaintID} status check"
+                        # Auto-generate solution if not already generated
+                        if not recent_complaint.Solution or not recent_complaint.Solution.strip():
+                            # Generate solution with Ollama
+                            verified_data_parts = [
+                                f"Complaint Category: {recent_complaint.CategoryType}",
+                                f"Customer Issue: {recent_complaint.ComplaintDescription}",
+                                f"\nRoot Cause Analysis: {recent_complaint.RootCauseAnalysis}",
+                                f"Analyzed On: {recent_complaint.RootCauseAnalysisDate.strftime('%B %d, %Y') if recent_complaint.RootCauseAnalysisDate else 'N/A'}",
+                                f"\nCorrective/Preventive Action: {recent_complaint.CorrectivePreventiveAction}",
+                                f"Action Date: {recent_complaint.CorrectivePreventiveActionDate.strftime('%B %d, %Y') if recent_complaint.CorrectivePreventiveActionDate else 'N/A'}",
+                                f"\nMarketing Review: {recent_complaint.MarketingReview}",
+                                f"Marketing Review Date: {recent_complaint.MarketingReviewDate.strftime('%B %d, %Y') if recent_complaint.MarketingReviewDate else 'N/A'}",
+                                f"\nPlant Head Review: {recent_complaint.PlantHeadReview}",
+                                f"Plant Head Review Date: {recent_complaint.PlantHeadReviewDate.strftime('%B %d, %Y') if recent_complaint.PlantHeadReviewDate else 'N/A'}",
+                            ]
+                            
+                            verified_data_str = "\n".join(verified_data_parts)
+                            
+                            # Prompt for Ollama to generate solution
+                            customer_message = (
+                                "Based on all the investigation data, root cause analysis, corrective actions taken, "
+                                "and all reviews completed, write a warm and professional solution message for the customer. "
+                                "Explain in simple human language what was the problem, what we found, what we did to fix it, "
+                                "and reassure them that the issue is now resolved. Keep it concise and friendly."
+                            )
+                            
+                            # Generate solution with Ollama
+                            generated_solution = ollama_client.generate_reply(customer_message, verified_data_str)
+                            
+                            # Save the generated solution
+                            if generated_solution:
+                                recent_complaint.Solution = generated_solution
+                                recent_complaint.Status = "Resolved"
+                                recent_complaint.UpdatedDate = datetime.now()
+                                recent_complaint.UpdatedBy = "System"
+                                db.commit()
                         
                         template_reply = (
                             f"Hello {current_user.User_Name},\n\n"
                             f"**Complaint ID:** {recent_complaint.ComplaintID}\n"
-                            f"**Category:** {recent_complaint.CategoryType}\n"
-                            f"**Status:** 📝 Under Review\n\n"
-                            f"Investigation Progress:\n"
+                            f"**Status:** ⏳ Will be resolved in 2-3 working days\n\n"
+                            f"Our team is finalizing the resolution. Thank you for your patience."
                         )
-                        
-                        if has_root_cause and has_root_cause_date:
-                            template_reply += f"✅ Root cause analysis completed\n"
-                        else:
-                            template_reply += f"⏳ Root cause analysis in progress\n"
-                        
-                        if has_corrective_action and has_corrective_date:
-                            template_reply += f"✅ Corrective actions taken\n"
-                        else:
-                            template_reply += f"⏳ Corrective actions pending\n"
-                        
-                        if has_marketing_review and has_marketing_date:
-                            template_reply += f"✅ Marketing review completed\n"
-                        else:
-                            template_reply += f"⏳ Marketing review pending\n"
-                        
-                        if has_plant_head_review and has_plant_head_date:
-                            template_reply += f"✅ Plant head review completed\n"
-                        else:
-                            template_reply += f"⏳ Plant head review pending\n"
-                        
-                        if has_hod_review and has_hod_date:
-                            template_reply += f"✅ HOD review completed\n"
-                        else:
-                            template_reply += f"⏳ HOD review pending\n"
-                        
-                        template_reply += (
-                            f"\nWe'll notify you as soon as all investigations are complete and the solution is ready. "
-                            f"We appreciate your patience!"
+                    else:
+                        overall_status = "Under Review"
+                        template_reply = (
+                            f"Hello {current_user.User_Name},\n\n"
+                            f"**Complaint ID:** {recent_complaint.ComplaintID}\n"
+                            f"**Status:** 📝 Under Review\n\n"
+                            f"Your complaint is being investigated. We will update you shortly."
                         )
                     
+                    verified_data = f"Complaint {recent_complaint.ComplaintID} status check"
                     structured_data = {
                         "complaint_id": recent_complaint.ComplaintID,
                         "category": recent_complaint.CategoryType,
-                        "status": recent_complaint.Status or "Under Review",
+                        "status": overall_status,
                     }
                 else:
                     # No complaints found
@@ -885,7 +984,8 @@ def chat(
         if settings.COMPANY_SUPPORT_EMAIL:
             structured_data = {"email": settings.COMPANY_SUPPORT_EMAIL}
             verified_data = f"Email: {settings.COMPANY_SUPPORT_EMAIL}"
-            template_reply = f"You can reach us by email at {settings.COMPANY_SUPPORT_EMAIL}."
+            # Format email as a mailto link that frontend can render as clickable
+            template_reply = f"You can reach us by email at [**{settings.COMPANY_SUPPORT_EMAIL}**](mailto:{settings.COMPANY_SUPPORT_EMAIL})\n\nClick the email address to send us a message."
         else:
             verified_data = "Email not configured."
             template_reply = "Our email contact isn't configured yet. Please check back soon or ask for human support."
@@ -1002,14 +1102,15 @@ def chat(
     # short internal marker like "Complaint CMP-... resolved" -- re-running
     # Ollama on that marker here would silently replace the real solution
     # text with a generic reply generated from almost no context.
-    skip_ollama_intents = (Intent.GREETING, Intent.COMPLAINT, Intent.COMPLAINT_TRACKING)
+    skip_ollama_intents = (Intent.GREETING, Intent.COMPLAINT, Intent.COMPLAINT_TRACKING, Intent.ORDER_REQUEST, Intent.PRODUCT_INFORMATION)
     skip_ollama_phrases = [
         "pending category selection",
         "pending - has previous complaints",
         "awaiting details",
         "user has",  # For complaint list display like "User has 3 complaint(s)"
         "complaint(s)",
-        "under review - missing data"  # Skip Ollama for incomplete complaints
+        "under review - missing data",  # Skip Ollama for incomplete complaints
+        "Order table does not exist yet"  # Skip Ollama for order requests with product list
     ]
     
     should_use_ollama = (

@@ -1,185 +1,309 @@
-# CRM Bot — Iron Ore / Iron Pellet Customer Portal
+# Iron Ore CRM - AI-Powered Customer Relationship Management System
 
-A complete, working CRM chatbot system:
+An intelligent CRM system for iron ore and pellet product businesses with AI-powered chat support, complaint management, and inventory tracking.
 
-```
-Customer → React/Vite Frontend → FastAPI Backend → Ollama and/or SQL Server → FastAPI Backend → React/Vite Frontend → Customer
-```
+## Features
 
-- **Frontend**: React + Vite — login screen, customer dashboard, floating chatbot.
-- **Backend**: FastAPI — auth, authorization, DB access, intent routing, Ollama integration.
-- **LLM**: Ollama (local) — phrases customer-friendly replies from backend-verified data only.
-- **Database**: Microsoft SQL Server (production) or SQLite (local demo) — seamlessly switch via config.
+### 🤖 AI Chat Assistant
+- Intelligent chatbot powered by Ollama (LLaMA 3.2)
+- Natural language understanding and response generation
+- Voice input support for hands-free operation
+- Real-time customer interactions
 
-The bot only knows about the six tables that currently exist (`Login_Master`, `Customer_Detail`,
-`Product_Master`, `ProductCategory_Master`, `IronOreSpecification_Master`,
-`IronPelletSpecification_Master`). It never invents orders, quotations, inventory levels,
-dispatch info, or complaint numbers — those modules are explicitly reported as "not yet
-available" until matching tables are added.
+### 📦 Product Management
+- Complete product catalog (Iron Ore, Iron Pellets)
+- Product specifications and details
+- Category-based organization
+- Inventory tracking with real-time availability
 
----
+### 🛒 Order Management
+- Smart product selection with availability checking
+- Quantity validation against inventory
+- Automatic inventory deduction on order acceptance
+- Order tracking with status updates
 
-## 1. Quick start (local demo, no SQL Server needed)
+### 🚨 Complaint Management
+- Three-tier complaint tracking system:
+  - **Under Review**: Initial complaint status
+  - **In Progress**: Investigation complete, resolution in 2-3 working days
+  - **Resolved**: Complaint resolution delivered
+- Automated solution generation using AI
+- Root cause analysis tracking
+- Corrective action management
+
+### 💬 Communication Features
+- Direct email contact option
+- Company information display
+- Customer support notifications
+- Real-time chat messaging
+
+### 🔒 Security
+- JWT-based authentication
+- Role-based access control
+- Secure password hashing
+- CORS protection
+
+## Tech Stack
 
 ### Backend
-
-```bash
-cd backend
-python -m venv .venv
-source .venv/bin/activate        # Windows: .venv\Scripts\activate
-pip install -r requirements.txt
-cp .env.example .env             # defaults to DB_MODE=sqlite — nothing else required
-python -m app.seed_data          # creates customer_db.sqlite3 with demo data
-uvicorn app.main:app --reload --port 8000
-```
-
-Demo login: **user ID** `shashi` / **password** `shashi@1234`
+- **Framework**: FastAPI (Python)
+- **Database**: Microsoft SQL Server
+- **AI**: Ollama (LLaMA 3.2)
+- **ORM**: SQLAlchemy
+- **Authentication**: JWT
 
 ### Frontend
+- **Framework**: React 18
+- **Build Tool**: Vite
+- **Styling**: CSS3
+- **HTTP Client**: Fetch API
+- **Markdown**: react-markdown
 
+## Project Structure
+
+```
+ironore-crm/
+├── backend/
+│   ├── app/
+│   │   ├── routers/          # API endpoints
+│   │   ├── models.py         # Database models
+│   │   ├── schemas.py        # Request/response schemas
+│   │   ├── auth.py           # Authentication logic
+│   │   ├── database.py       # Database connection
+│   │   ├── config.py         # Configuration
+│   │   ├── intent.py         # Intent classification
+│   │   └── ollama_client.py  # AI integration
+│   ├── database/             # SQL migration scripts
+│   ├── scripts/              # Utility and test scripts
+│   ├── requirements.txt      # Python dependencies
+│   ├── .env.example          # Environment template
+│   └── main.py               # Application entry point
+│
+├── frontend/
+│   ├── src/
+│   │   ├── components/       # React components
+│   │   ├── pages/            # Page components
+│   │   ├── api.js            # API client
+│   │   ├── App.jsx           # Main app component
+│   │   └── styles.css        # Global styles
+│   ├── package.json          # Dependencies
+│   ├── vite.config.js        # Vite configuration
+│   ├── .env.example          # Environment template
+│   └── index.html            # HTML entry point
+│
+├── README.md                 # This file
+├── VOICE_AND_ENV_SETUP.md   # Voice and environment setup guide
+└── .gitignore               # Git ignore rules
+```
+
+## Prerequisites
+
+- **Node.js** 16+ (for frontend)
+- **Python** 3.9+ (for backend)
+- **Microsoft SQL Server** (database)
+- **Ollama** (for AI chat) - [Install Ollama](https://ollama.ai)
+
+## Installation
+
+### 1. Clone the Repository
+```bash
+git clone https://github.com/yourusername/ironore-crm.git
+cd ironore-crm
+```
+
+### 2. Backend Setup
+
+Navigate to the backend directory:
+```bash
+cd backend
+```
+
+Create and activate virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate  # On Windows: venv\Scripts\activate
+```
+
+Copy environment template and configure:
+```bash
+cp .env.example .env
+# Edit .env with your SQL Server and Ollama credentials
+```
+
+Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+Run the backend server:
+```bash
+python -m uvicorn app.main:app --reload
+```
+
+The backend API will be available at `http://localhost:8000`
+
+### 3. Frontend Setup
+
+Navigate to the frontend directory in a new terminal:
 ```bash
 cd frontend
+```
+
+Copy environment template:
+```bash
+cp .env.example .env
+# .env should have: VITE_API_BASE_URL=http://localhost:8000
+```
+
+Install dependencies:
+```bash
 npm install
-cp .env.example .env             # VITE_API_BASE_URL=http://localhost:8000
+```
+
+Start the development server:
+```bash
 npm run dev
 ```
 
-Open the URL Vite prints (usually `http://localhost:5173`).
+The frontend will be available at `http://localhost:5173`
 
-### Ollama (optional but recommended)
+## Database Setup
+
+### Create Tables
+Run the SQL scripts in the `database/` folder to create necessary tables:
 
 ```bash
-ollama pull llama3.1
-ollama serve
+# Connect to your SQL Server and execute:
+# database/add_complaint_columns.sql
+# database/seed_inventory_data.sql
 ```
 
-If Ollama isn't running, the backend automatically falls back to clean templated
-responses built directly from the verified database data — **the bot keeps working
-either way**, it just loses the extra natural-language polish.
+Or use the provided Python scripts:
 
----
-
-## 2. Switching to MS SQL Server
-
-**📚 See detailed guide: [`backend/MSSQL_QUICKSTART.md`](backend/MSSQL_QUICKSTART.md) (5-minute setup)**
-
-### Quick Setup
-
-1. **Install ODBC Driver 18 for SQL Server**
-   - Download: https://go.microsoft.com/fwlink/?linkid=2249004
-   - Verify: `Get-OdbcDriver | Where-Object {$_.Name -like "*SQL Server*"}`
-
-2. **Install Python dependencies**
-   ```bash
-   cd backend
-   pip install -r requirements.txt  # Now includes pyodbc
-   ```
-
-3. **Create database**
-   ```bash
-   sqlcmd -S localhost -U sa -P "YourPassword" -Q "CREATE DATABASE Customer_DB"
-   ```
-
-4. **Configure `.env`**
-   ```env
-   DB_MODE=mssql
-   MSSQL_SERVER=localhost
-   MSSQL_PORT=1433
-   MSSQL_DATABASE=Customer_DB
-   MSSQL_USER=sa
-   MSSQL_PASSWORD=YourPassword123!
-   MSSQL_DRIVER=ODBC Driver 18 for SQL Server
-   MSSQL_ENCRYPT=yes
-   MSSQL_TRUST_SERVER_CERT=yes
-   ```
-
-5. **Test connection & create tables**
-   ```bash
-   python test_connection.py        # Verify connection works
-   python create_mssql_schema.py    # Create all tables
-   python -m app.seed_data          # Optional: Load demo data
-   ```
-
-6. **Start the backend**
-   ```bash
-   uvicorn app.main:app --reload
-   ```
-
-**📖 Resources:**
-- Quick Start: `backend/MSSQL_QUICKSTART.md`
-- Comprehensive Guide: `MSSQL_SETUP_GUIDE.md`
-- Migration Summary: `backend/MSSQL_MIGRATION_SUMMARY.md`
-
-Passwords in `Login_Master` must be bcrypt hashes (use `app.auth.hash_password(...)`
-to generate one), never plaintext.
-
----
-
-## 3. Project layout
-
-```
-backend/
-  app/
-    main.py          FastAPI app, CORS, router registration
-    config.py         All settings read from environment variables
-    database.py        SQLAlchemy engine/session
-    models.py            ORM models for the six existing tables ONLY
-    schemas.py             Pydantic request/response models
-    auth.py                   JWT + bcrypt password verification, current-user dependency
-    intent.py                    Rule-based intent classification & entity extraction
-    ollama_client.py               Calls local Ollama, fails soft to templated replies
-    seed_data.py                    Demo data loader (SQLite only)
-    routers/
-      auth.py       POST /api/auth/login
-      customer.py    GET  /api/customer/me            (authenticated customer only)
-      product.py      GET  /api/products, /api/categories, /api/specs/iron-ore, /api/specs/iron-pellet
-      chat.py           POST /api/chat                 (core chatbot endpoint)
-
-frontend/
-  src/
-    api.js              Fetch wrapper + session storage
-    App.jsx              Auth-aware router
-    pages/
-      Login.jsx
-      Dashboard.jsx
-    components/
-      ChatWidget.jsx      Floating button + chat window
-      ChatMessage.jsx      Markdown-rendering message bubble
-      ProductCard.jsx
-    styles.css              Full design system
+```bash
+# From backend directory:
+python scripts/populate_inventory_data.py
 ```
 
----
+## Configuration
 
-## 4. What the bot can and can't do today
+### Environment Variables
 
-| Capability | Status |
-|---|---|
-| Customer login / authorization | ✅ Backed by `Login_Master`, JWT sessions |
-| Customer's own details | ✅ Backed by `Customer_Detail`, scoped to authenticated CID |
-| Product info & categories | ✅ Backed by `Product_Master` / `ProductCategory_Master` |
-| Iron Ore specifications | ✅ Backed by `IronOreSpecification_Master` |
-| Iron Pellet specifications | ✅ Backed by `IronPelletSpecification_Master` |
-| Quotation / Order requests | 🟡 Collects details in chat, clearly states no storage/processing exists yet |
-| Order tracking / dispatch | 🟡 Clearly states this isn't available yet |
-| Inventory quantity | 🟡 Reports product Active/Inactive status only, never a quantity |
-| Complaints | 🟡 Collects details in chat, clearly states no permanent registration yet |
-| WhatsApp / human support | ✅ if configured via `.env`, otherwise says so honestly |
+#### Backend (.env)
+- `MSSQL_SERVER`: SQL Server host
+- `MSSQL_USER`: Database username
+- `MSSQL_PASSWORD`: Database password
+- `COMPANY_SUPPORT_EMAIL`: Support email for customer contact
+- `COMPANY_SUPPORT_PHONE`: Support phone number
+- `OLLAMA_BASE_URL`: Ollama server URL (default: http://localhost:11434)
+- `JWT_SECRET`: Secret key for JWT tokens
 
-When Orders, Inventory, Quotations, Dispatch, or Complaints tables are added later,
-extend `models.py`, `schemas.py`, add a router, and add matching branches in
-`routers/chat.py` / `intent.py` — the rest of the system does not need to change.
+#### Frontend (.env)
+- `VITE_API_BASE_URL`: Backend API URL (default: http://localhost:8000)
 
----
+## API Endpoints
 
-## 5. Security notes
+### Authentication
+- `POST /api/auth/login` - User login
 
-- The frontend never talks to SQL Server or Ollama directly — only to the FastAPI backend.
-- Passwords are bcrypt-hashed; the API never returns password fields.
-- Every customer-data endpoint requires a valid JWT resolved to an **active**
-  `Login_Master` row (`get_current_user` dependency) before touching the DB.
-- A customer can only ever retrieve the `Customer_Detail` row linked to their own login.
-- All DB queries go through SQLAlchemy's parameterized query builder — no raw string-built SQL.
-- The chat endpoint sanitizes whatever Ollama returns (strips SQL-looking text, credential-shaped
-  strings, and any other customer's CID) before it reaches the frontend — Ollama's output is
-  treated as untrusted, not as an authority on security rules.
+### Customer
+- `GET /api/customer/me` - Get current customer info
+
+### Chat
+- `POST /api/chat` - Send chat message
+
+### Products
+- `GET /api/products` - List products
+- `GET /api/products/{id}` - Get product details
+- `GET /api/categories` - List categories
+
+### Specifications
+- `GET /api/specs/iron-ore` - Get iron ore specs
+- `GET /api/specs/iron-pellet` - Get iron pellet specs
+
+### Complaints
+- `POST /api/complaints` - Create complaint
+- `GET /api/complaints` - List complaints
+
+## Features in Detail
+
+### Chat Assistant
+- **Product Information**: Search for products and specifications
+- **Order Placement**: Browse available products, place orders with quantity validation
+- **Complaint Management**: Raise complaints, track status
+- **Customer Support**: Direct contact with company
+
+### Inventory Management
+- **Real-time Availability**: Products shown only if stock is available
+- **Automatic Deduction**: Orders automatically deduct from inventory
+- **Stock Tracking**: Produced vs. Sold entries for complete audit trail
+
+### Complaint Workflow
+1. Customer raises complaint → Status: "Under Review"
+2. Investigation starts → Root cause analysis, corrective actions
+3. All data filled → Status: "Will be resolved in 2-3 working days"
+4. Solution generated → Status: "Resolved"
+
+## Development Scripts
+
+Located in `backend/scripts/`:
+
+- `populate_inventory_data.py` - Populate sample inventory data
+- `check_inventory_schema.py` - Verify inventory table structure
+- `populate_complaint.py` - Add test complaints
+- `test_ollama_direct.py` - Test AI integration
+
+Run scripts from backend directory:
+```bash
+python scripts/populate_inventory_data.py
+```
+
+## Contributing
+
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/AmazingFeature`)
+3. Commit your changes (`git commit -m 'Add AmazingFeature'`)
+4. Push to the branch (`git push origin feature/AmazingFeature`)
+5. Open a Pull Request
+
+## Troubleshooting
+
+### Backend Issues
+
+**"Database connection failed"**
+- Check SQL Server is running
+- Verify credentials in `.env`
+- Ensure database exists
+
+**"Ollama connection failed"**
+- Install Ollama: https://ollama.ai
+- Start Ollama service: `ollama serve`
+- Verify `OLLAMA_BASE_URL` in `.env`
+
+### Frontend Issues
+
+**"Cannot connect to API"**
+- Ensure backend is running on port 8000
+- Check `VITE_API_BASE_URL` in `.env`
+- Clear browser cache
+
+## License
+
+This project is licensed under the MIT License - see the LICENSE file for details.
+
+## Support
+
+For issues and questions:
+1. Check existing GitHub issues
+2. Create a new issue with detailed description
+3. Contact support at the email configured in `.env`
+
+## Changelog
+
+### Version 1.0.0
+- Initial release
+- AI-powered chat assistant
+- Product and inventory management
+- Complaint tracking system
+- Order processing with inventory deduction
+- Email contact feature

@@ -90,6 +90,23 @@ export const api = {
   chat: (message, action) =>
     request('/api/chat', { method: 'POST', body: JSON.stringify({ message, action }) }),
 
+  validateOrderQuantity: (pid, quantity) =>
+    request('/api/orders/validate-quantity', { 
+      method: 'POST', 
+      body: JSON.stringify({ pid, quantity }) 
+    }),
+
+  createComplaint: (category, description, poNumber, dispatchDate) =>
+    request('/api/complaints', {
+      method: 'POST',
+      body: JSON.stringify({
+        category_type: category,
+        description,
+        po_number: poNumber || null,
+        dispatch_date: dispatchDate || null,
+      }),
+    }),
+
   health: () => request('/api/health'),
 }
 

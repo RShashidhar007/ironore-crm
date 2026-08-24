@@ -110,6 +110,18 @@ class IronPelletSpecificationMaster(Base):
     Group = Column("Group", Integer)  # INTEGER in actual DB
 
 
+class InventoryMaster(Base):
+    __tablename__ = "Inventory_Master"
+
+    InventoryID = Column(Integer, primary_key=True, autoincrement=True)
+    PID = Column(String(50), ForeignKey("Product_Master.PID"))
+    Category = Column(String(100))
+    QuantityMT = Column(Integer)  # Available quantity in MT
+    ProducedDate = Column(Date)
+    InitialPrice = Column(Integer)
+    SellingPrice = Column(Integer)
+
+
 class ComplaintMaster(Base):
     __tablename__ = "Complaints_Master"
 

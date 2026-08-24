@@ -25,9 +25,10 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
   const [isListening, setIsListening] = useState(false)
   const [complaintDetails, setComplaintDetails] = useState({ category: '', description: '', poNumber: '', dispatchDate: '', complaintIdInput: '' })
   const [selectedComplaintCategory, setSelectedComplaintCategory] = useState(null)
-  const [complaintOption, setComplaintOption] = useState(null) // 'track' or 'new'
-  const [selectedField, setSelectedField] = useState(null) // Track which field is selected ('poNumber', 'dispatchDate', 'description')
-  const selectedFieldRef = useRef(null) // Ref to track selected field for speech input - initialize to null
+  const [complaintOption, setComplaintOption] = useState(null)
+  const [selectedField, setSelectedField] = useState(null)
+  const [orderDetails, setOrderDetails] = useState({ selectedProduct: null, quantity: '', availableQuantity: null })
+  const selectedFieldRef = useRef(null)
   const scrollRef = useRef(null)
   const handledActionRef = useRef(null)
   const recognitionRef = useRef(null)
@@ -111,12 +112,17 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
       // Check if the response mentions previous complaints
       const hasPreviousComplaints = res.reply.includes('You have') && res.reply.includes('previous complaint(s)')
       
+      // Check if response is for order placement
+      const isOrderResponse = text === 'Place an Order' || action === 'Place an Order'
+      
       setMessages((prev) => [...prev, { 
         role: 'bot', 
         text: res.reply,
         showComplaintCategories: res.reply.includes('Please select one of the following complaint categories'),
         showComplaintForm: false,
-        showPreviousComplaintsOptions: hasPreviousComplaints
+        showPreviousComplaintsOptions: hasPreviousComplaints,
+        showOrderProducts: isOrderResponse,
+        orderProducts: isOrderResponse && res.data ? res.data : []
       }])
     } catch (err) {
       const msg = err instanceof ApiError
@@ -146,6 +152,50 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
     })
   }
 
+  function handleSelectProduct(product) {
+    setOrderDetails({ selectedProduct: product, quantity: '', availableQuantity: null })
+    // Update the last bot message to show order form
+    setMessages((prev) => {
+      const newMessages = [...prev]
+      const lastBotMsgIndex = newMessages.map((m, i) => m.role === 'bot' ? i : -1).filter(i => i !== -1).pop()
+      if (lastBotMsgIndex !== undefined) {
+        newMessages[lastBotMsgIndex] = {
+          ...newMessages[lastBotMsgIndex],
+          showOrderProducts: false,
+          showOrderForm: true,
+          selectedProduct: product
+        }
+      }
+      return newMessages
+    })
+  }
+
+  async function submitOrder() {
+    if (!orderDetails.selectedProduct || !orderDetails.quantity) return
+    
+    setLoading(true)
+    try {
+      // Send order with product PID and quantity to backend for validation
+      const res = await api.chat(
+        `Order: Product ${orderDetails.selectedProduct.PID}, Quantity: ${orderDetails.quantity} MT`,
+        `order_quantity:${orderDetails.selectedProduct.PID}:${orderDetails.quantity}`
+      )
+      
+      setMessages((prev) => [...prev, { 
+        role: 'bot', 
+        text: res.reply,
+        showOrderForm: false
+      }])
+    } catch (err) {
+      const msg = err instanceof ApiError
+        ? err.message
+        : "I'm unable to process your order right now. Please try again."
+      setMessages((prev) => [...prev, { role: 'bot', text: msg, isError: true }])
+    } finally {
+      setLoading(false)
+    }
+  }
+
   // Function to handle previous complaints options (track or new)
 
   function runAction(actionLabel) {
@@ -173,6 +223,7 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
     setSelectedComplaintCategory(null)
     setComplaintDetails({ category: '', description: '', poNumber: '', dispatchDate: '', complaintIdInput: '' })
     setComplaintOption(null)
+    setOrderDetails({ selectedProduct: null })
   }
 
   function toggleListening() {
@@ -198,70 +249,21 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
 
   async function submitComplaint(category, description, poNumber, dispatchDate) {
     try {
-      const token = sessionStorage.getItem('ferrum_crm_token') || sessionStorage.getItem('crm_token')
-      
-      const res = await fetch('http://localhost:8000/api/complaints', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
-        body: JSON.stringify({ 
-          category_type: category, 
-          description: description,
-          po_number: poNumber || null,
-          dispatch_date: dispatchDate || null
-        }),
-      })
-      console.log('Response status:', res.status);
-      const data = await res.json()
-      console.log('Response data:', data);
-      
-      if (res.ok) {
-        setMessages((prev) => [...prev, { 
-          role: 'bot', 
-          text: `Thank you for reporting this issue, ${user?.name || 'Customer'}. Your complaint has been registered with tracking number **${data.ComplaintID}**.\n\nWe will investigate the issue and keep you updated on the resolution.\n\nIf you need to reference this complaint, please use the ID: ${data.ComplaintID}` 
-        }])
-        return true
-      } else {
-        // Handle error response - try to extract the error message
-        console.error('Complaint submission error - Status:', res.status, 'Response:', data);
-        
-        // Try multiple ways to extract error message
-        let errorDetail = 'Unknown error';
-        if (data && typeof data === 'object') {
-          // Check each possible error field
-          if (data.detail) errorDetail = String(data.detail);
-          else if (data.message) errorDetail = String(data.message);
-          else if (data.error) errorDetail = String(data.error);
-          else {
-            // If no specific error field, use JSON.stringify
-            errorDetail = JSON.stringify(data);
-          }
-        }
-        
-        // Ensure it's a string (double-check)
-        if (typeof errorDetail !== 'string') {
-          errorDetail = String(errorDetail);
-        }
-        
-        // Truncate for display
-        errorDetail = errorDetail.substring(0, 200);
-        
-        setMessages((prev) => [...prev, { 
-          role: 'bot', 
-          text: `Sorry, there was an error registering your complaint: ${errorDetail} (HTTP ${res.status})`, 
-          isError: true 
-        }])
-        return false
-      }
-    } catch (err) {
-      console.error('Complaint submission exception:', err);
-      setMessages((prev) => [...prev, { 
-        role: 'bot', 
-        text: `I'm unable to connect to the CRM service right now. Please try again. Error: ${err.message}`, 
-        isError: true 
+      const data = await api.createComplaint(category, description, poNumber, dispatchDate)
+      console.log('Response data:', data)
+
+      setMessages((prev) => [...prev, {
+        role: 'bot',
+        text: `Thank you for reporting this issue, ${user?.name || 'Customer'}. Your complaint has been registered with tracking number **${data.ComplaintID}**.\n\nWe will investigate the issue and keep you updated on the resolution.\n\nIf you need to reference this complaint, please use the ID: ${data.ComplaintID}`
       }])
+      return true
+    } catch (err) {
+      console.error('Complaint submission error:', err)
+      const isNetworkError = err instanceof ApiError && err.status === 0
+      const text = isNetworkError
+        ? `I'm unable to connect to the CRM service right now. Please try again. Error: ${err.message}`
+        : `Sorry, there was an error registering your complaint: ${err.message}`
+      setMessages((prev) => [...prev, { role: 'bot', text, isError: true }])
       return false
     }
   }
@@ -339,13 +341,11 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
                   setComplaintDetails({ ...complaintDetails, complaintIdInput: value })
                 }}
                 onSendMessage={(text, action) => {
-                  // Send message with optional action
                   sendMessage(text, action)
                 }}
                 onFieldSelect={(field) => {
                   setSelectedField(field)
                   selectedFieldRef.current = field
-                  // If already listening, stop and restart
                   if (isListening) {
                     recognitionRef.current.stop()
                     setIsListening(false)
@@ -364,7 +364,6 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
                     setComplaintDetails({ category: '', description: '', poNumber: '', dispatchDate: '', complaintIdInput: '' })
                     setSelectedComplaintCategory(null)
                     setComplaintOption(null)
-                    // Show complaint categories after selecting 'new'
                     setMessages((prev) => {
                       const newMessages = [...prev]
                       const lastBotMsgIndex = newMessages.map((m, i) => m.role === 'bot' ? i : -1).filter(i => i !== -1).pop()
@@ -378,10 +377,18 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
                       return newMessages
                     })
                   } else if (action === 'submit') {
-                    // Submit complaint ID for tracking
                     submitComplaintId()
                   }
                 }}
+                showOrderProducts={m.showOrderProducts || false}
+                orderProducts={m.orderProducts || []}
+                onSelectProduct={handleSelectProduct}
+                showOrderForm={m.showOrderForm || false}
+                selectedProduct={m.selectedProduct}
+                orderQuantity={orderDetails.quantity}
+                onOrderQuantityChange={(value) => setOrderDetails({ ...orderDetails, quantity: value })}
+                onSubmitOrder={submitOrder}
+                availableQuantity={m.availableQuantity}
                 loading={loading}
               />
             ))}
