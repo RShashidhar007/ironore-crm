@@ -1,341 +1,527 @@
-# Iron Ore CRM - Setup Guide
+# Iron Ore CRM - Complete Setup Guide
+
+This guide provides step-by-step instructions for setting up the entire Iron Ore CRM system.
+
+## Table of Contents
+
+1. [Prerequisites](#prerequisites)
+2. [Database Setup](#database-setup)
+3. [Backend Setup](#backend-setup)
+4. [Frontend Setup](#frontend-setup)
+5. [Running the Application](#running-the-application)
+6. [Testing](#testing)
+7. [Troubleshooting](#troubleshooting)
+
+---
 
 ## Prerequisites
 
-- Python 3.8+
-- SQL Server (or SQLite for development)
-- Node.js 14+ (for frontend)
-- npm or yarn
+### Required Software
+
+- **Python 3.9+** - [Download](https://www.python.org/downloads/)
+- **Node.js 16+** & npm - [Download](https://nodejs.org/)
+- **SQL Server 2019+** - [Download](https://www.microsoft.com/en-us/sql-server/sql-server-downloads)
+- **Ollama** - [Download](https://ollama.ai)
+- **Git** - [Download](https://git-scm.com)
+
+### System Requirements
+
+- **RAM**: 4GB minimum (8GB recommended)
+- **Storage**: 2GB free space
+- **Network**: Internet connection for Ollama model download
+- **OS**: Windows 10+, macOS 10.14+, or Ubuntu 18+
+
+### Verify Installation
+
+```bash
+# Check Python
+python --version
+
+# Check Node.js
+node --version
+npm --version
+
+# Check Git
+git --version
+```
+
+---
+
+## Database Setup
+
+### 1. Create SQL Server Database
+
+```sql
+-- Using SQL Server Management Studio or sqlcmd
+
+-- Create database
+CREATE DATABASE Customer_DB;
+
+-- Use the database
+USE Customer_DB;
+
+-- Create login if not exists
+IF NOT EXISTS (SELECT * FROM sys.sql_logins WHERE name = 'crm_user')
+    CREATE LOGIN crm_user WITH PASSWORD = 'Shashi@2005';
+
+-- Create user
+CREATE USER crm_user FOR LOGIN crm_user;
+
+-- Grant permissions
+ALTER ROLE db_owner ADD MEMBER crm_user;
+```
+
+### 2. Run Migration Scripts
+
+```bash
+# From backend directory
+cd backend
+
+# Run migrations
+python scripts/migrate_database.py
+```
+
+### 3. Populate Sample Data
+
+```bash
+# Populate products and inventory
+python scripts/populate_inventory_data.py
+
+# Add test complaints (optional)
+python scripts/populate_complaint.py
+```
+
+### 4. Verify Database
+
+```bash
+# Check schema
+python scripts/check_inventory_schema.py
+```
+
+---
 
 ## Backend Setup
 
-### 1. Navigate to Backend Directory
+### 1. Clone Repository
+
 ```bash
-cd backend
+git clone https://github.com/RShashidhar007/ironore-crm.git
+cd ironore-crm/backend
 ```
 
-### 2. Create Virtual Environment (Recommended)
+### 2. Create Virtual Environment
+
 ```bash
 # Windows
 python -m venv venv
 venv\Scripts\activate
 
-# Linux/Mac
+# macOS/Linux
 python3 -m venv venv
 source venv/bin/activate
 ```
 
 ### 3. Install Dependencies
+
 ```bash
 pip install -r requirements.txt
 ```
 
-This installs:
-- FastAPI & Uvicorn (web framework)
-- SQLAlchemy (ORM)
-- Pydantic (validation)
-- ReportLab (PDF generation) ← **New for quotations**
-- Pillow (image handling) ← **New for PDF**
-- PyODBC (SQL Server driver)
-- And other dependencies
-
-### 4. Configure Environment
-
-Create `.env` file in `backend/` directory (copy from `.env.example`):
+### 4. Configure Environment Variables
 
 ```bash
+# Copy template
 cp .env.example .env
+
+# Edit .env with your settings
 ```
 
-Then edit `.env` with your settings:
-```
-DB_MODE=mssql  # or sqlite for local testing
-DB_SERVER=your_server
-DB_NAME=Customer_DB
-DB_USER=your_username
-DB_PASSWORD=your_password
+**Important .env Variables:**
 
+```env
+# Database Configuration
+MSSQL_SERVER=SHASHIDHAR\SQLEXPRESS
+MSSQL_DATABASE=Customer_DB
+MSSQL_USER=crm_user
+MSSQL_PASSWORD=Shashi@2005
+
+# AI Configuration
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=llama3.2
+OLLAMA_ENABLED=true
+
+# Company Settings
+COMPANY_SUPPORT_EMAIL=rshashidhar513@gmail.com
+COMPANY_SUPPORT_PHONE=7022486778
+
+# JWT
+JWT_SECRET=your-random-secret-key-change-this-in-production
+JWT_EXPIRE_MINUTES=120
+
+# Frontend
 FRONTEND_ORIGIN=http://localhost:5173
-COMPANY_SUPPORT_EMAIL=sales@company.com
-COMPANY_WHATSAPP_NUMBER=+91XXXXXXXXXX
-
-# Ollama settings (optional)
-OLLAMA_HOST=http://localhost:11434
-OLLAMA_MODEL=mistral
 ```
 
-### 5. Database Setup
-
-#### Option A: SQL Server (Production)
-```bash
-# Apply migrations
-sqlcmd -S your_server -U username -P password -d Customer_DB -i database/create_quotations_table.sql
-```
-
-#### Option B: SQLite (Development)
-```bash
-# Set DB_MODE=sqlite in .env
-# Tables are created automatically on first run
-```
-
-### 6. Run Backend Server
+### 5. Start Backend Server
 
 ```bash
-# Development (with hot reload)
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
-
-# Production
-uvicorn app.main:app --host 0.0.0.0 --port 8000 --workers 4
-```
-
-**Expected Output:**
-```
-INFO:     Uvicorn running on http://0.0.0.0:8000
-INFO:     Application startup complete
-```
-
-**Test API:**
-```bash
-curl http://localhost:8000/api/health
-# Response: {"status":"ok"}
-```
-
-## Frontend Setup
-
-### 1. Navigate to Frontend Directory
-```bash
-cd frontend
-```
-
-### 2. Install Dependencies
-```bash
-npm install
-# or
-yarn install
-```
-
-### 3. Configure Environment
-
-Create `.env` file in `frontend/` directory:
-
-```
-VITE_API_URL=http://localhost:8000/api
-VITE_APP_NAME="Iron Ore CRM"
-```
-
-### 4. Run Development Server
-
-```bash
-npm run dev
-# or
-yarn dev
-```
-
-**Expected Output:**
-```
-VITE v4.x.x  ready in XXX ms
-
-➜  Local:   http://localhost:5173/
-➜  press h to show help
-```
-
-## Verification Checklist
-
-### Backend
-- [ ] Dependencies installed: `pip list | grep -i reportlab`
-- [ ] App loads: `python -c "from app.main import app; print('✓ OK')"`
-- [ ] Database connects
-- [ ] Server runs: `uvicorn app.main:app --reload`
-- [ ] Health endpoint responds: `curl http://localhost:8000/api/health`
-
-### Frontend
-- [ ] Dependencies installed: `npm list`
-- [ ] Dev server runs: `npm run dev`
-- [ ] Page loads: `http://localhost:5173`
-- [ ] Can login
-
-### Integration
-- [ ] Frontend connects to backend API
-- [ ] Chat functionality works
-- [ ] Can click "Ask for a Quotation"
-- [ ] Quotation PDF generates
-
-## Important Dependencies for Quotations
-
-The quotation feature requires two new packages:
-
-### ReportLab 4.0.9
-- PDF document generation library
-- Professional reporting capabilities
-- Used to create branded quotation PDFs
-
-### Pillow 10.1.0
-- Python Imaging Library
-- Image handling and processing
-- Required by ReportLab for PDF graphics
-
-Both are automatically installed with `pip install -r requirements.txt`
-
-## Troubleshooting
-
-### "ModuleNotFoundError: No module named 'reportlab'"
-**Solution:** Install dependencies
-```bash
-cd backend
-pip install -r requirements.txt
-```
-
-### "ModuleNotFoundError: No module named 'app'"
-**Solution:** Run from `backend/` directory with Python path
-```bash
-cd backend
 python -m uvicorn app.main:app --reload
 ```
 
-### "Connection refused" to database
-**Solution:** Check DB_MODE in `.env`
-- For SQL Server: Verify server/credentials
-- For SQLite: Ensure database file permissions
+**Expected Output:**
+```
+INFO:     Uvicorn running on http://127.0.0.1:8000
+INFO:     Application startup complete.
+```
 
-### PDF not generating / "Permission denied"
-**Solution:** Create `quotations/` directory with write permissions
+### 6. Verify Backend
+
+Open browser and go to: `http://localhost:8000/docs`
+
+You should see the interactive API documentation.
+
+---
+
+## Frontend Setup
+
+### 1. Navigate to Frontend
+
 ```bash
-mkdir quotations
-chmod 755 quotations  # Linux/Mac
-# Windows: Right-click folder → Properties → Security → Edit
+cd ../frontend
 ```
 
-### CORS errors in frontend
-**Solution:** Check `FRONTEND_ORIGIN` in backend `.env`
-```
-FRONTEND_ORIGIN=http://localhost:5173
-```
+### 2. Install Dependencies
 
-### API calls failing from frontend
-**Solution:** Check `VITE_API_URL` in frontend `.env`
-```
-VITE_API_URL=http://localhost:8000/api
-```
-
-## Database Migrations
-
-### Create Quotations Table
 ```bash
-# SQL Server
-sqlcmd -S SERVER -U USER -P PASS -d DB -i backend/database/create_quotations_table.sql
-
-# Via Python
-python backend/scripts/migrate_database.py
+npm install
 ```
 
-### Verify Table Created
-```sql
-SELECT * FROM [dbo].[Quotations_Master]
+### 3. Configure Environment Variables
+
+```bash
+# Copy template
+cp .env.example .env
+
+# Edit .env
 ```
 
-## Project Structure
+**Frontend .env:**
 
-```
-ironore-crm/
-├── backend/
-│   ├── app/
-│   │   ├── main.py                  # FastAPI app
-│   │   ├── models.py                # Database models (includes Quotation)
-│   │   ├── quotation_service.py     # Quotation logic
-│   │   └── routers/
-│   │       ├── chat.py              # Chat endpoints
-│   │       └── quotation.py         # Quotation endpoints
-│   ├── database/
-│   │   ├── create_quotations_table.sql
-│   │   └── seed_inventory_data.sql
-│   ├── requirements.txt             # Python dependencies
-│   ├── .env.example                 # Example configuration
-│   └── .env                         # Local configuration (git-ignored)
-│
-├── frontend/
-│   ├── src/
-│   │   ├── pages/
-│   │   ├── components/
-│   │   └── api.js
-│   ├── package.json                 # Node dependencies
-│   ├── .env.example                 # Example configuration
-│   └── .env                         # Local configuration (git-ignored)
-│
-└── README.md                        # Main documentation
+```env
+VITE_API_BASE_URL=http://localhost:8000/api
 ```
 
-## Development Workflow
+### 4. Start Development Server
 
-### 1. Start Backend
+```bash
+npm run dev
+```
+
+**Expected Output:**
+```
+  VITE v5.4.21  ready in XXX ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  press h to show help
+```
+
+---
+
+## Running the Application
+
+### Start All Services (In Order)
+
+**Terminal 1 - SQL Server**
+```bash
+# Ensure SQL Server is running
+# (Usually starts automatically on Windows)
+```
+
+**Terminal 2 - Ollama**
+```bash
+ollama serve
+```
+
+Wait for message: `Listening on 127.0.0.1:11434`
+
+**Terminal 3 - Backend**
 ```bash
 cd backend
 source venv/bin/activate  # or venv\Scripts\activate on Windows
-uvicorn app.main:app --reload
+python -m uvicorn app.main:app --reload
 ```
 
-### 2. Start Frontend (in new terminal)
+Wait for: `Application startup complete`
+
+**Terminal 4 - Frontend**
 ```bash
 cd frontend
 npm run dev
 ```
 
-### 3. Access Application
-- Frontend: http://localhost:5173
-- API: http://localhost:8000
-- API Docs: http://localhost:8000/docs
+### Access the Application
 
-### 4. Make Changes
-- Backend: Changes auto-reload
-- Frontend: Changes auto-reload
+- **Frontend**: http://localhost:5173
+- **Backend API**: http://localhost:8000
+- **API Docs**: http://localhost:8000/docs
 
-### 5. Test Quotation Feature
-- Login to frontend
-- Click "Ask for a Quotation"
-- Enter product ID (e.g., 13000000) and quantity (e.g., 100)
-- See generated quotation with PDF
+### Test Login
 
-## Testing
-
-### Backend Tests
-```bash
-cd backend
-pytest tests/  # If tests exist
-```
-
-### Frontend Tests
-```bash
-cd frontend
-npm run test
-```
-
-### Manual Testing
-1. Test each API endpoint (see API docs at http://localhost:8000/docs)
-2. Test chat flow in frontend
-3. Test quotation generation with multiple products
-4. Verify PDF downloads correctly
-
-## Production Deployment
-
-### Backend
-1. Install dependencies: `pip install -r requirements.txt`
-2. Set up database: Run migration scripts
-3. Configure `.env` for production
-4. Run with gunicorn: `gunicorn app.main:app -w 4`
-
-### Frontend
-1. Build: `npm run build`
-2. Deploy built files to web server
-3. Configure `.env` for production API URL
-
-## Support
-
-For issues or questions:
-- Check documentation in `backend/` and root directories
-- Review error messages carefully
-- Verify all dependencies are installed
-- Ensure `.env` files are properly configured
+Use these credentials to test:
+- **Username**: shashi
+- **Password**: test123
 
 ---
 
-**Last Updated:** August 2026  
-**Version:** 1.0
+## Testing
+
+### 1. Test Backend
+
+```bash
+# Test quotation feature
+cd backend
+python tests/test_quotation_flow.py
+
+# Test email feature
+python tests/test_email_feature.py
+```
+
+### 2. Test Frontend (Manual)
+
+1. Open http://localhost:5173
+2. Login with test credentials
+3. Test each feature:
+   - Ask for a Quotation
+   - Place an Order
+   - Raise a Complaint
+   - Track Complaint
+   - Contact Company
+
+### 3. Test API Directly
+
+```bash
+# Using curl
+curl -X POST http://localhost:8000/api/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"user_id":"shashi","password":"test123"}'
+```
+
+---
+
+## Troubleshooting
+
+### SQL Server Connection Issues
+
+**Error**: "Could not connect to instance 'SQLEXPRESS'"
+
+```bash
+# Check if SQL Server is running
+# Windows: Services app → SQL Server (SQLEXPRESS)
+
+# Or verify connection:
+sqlcmd -S SHASHIDHAR\SQLEXPRESS -U crm_user -P "Shashi@2005"
+```
+
+### Ollama Connection Issues
+
+**Error**: "Failed to connect to Ollama"
+
+```bash
+# 1. Verify Ollama is running
+# Visit: http://localhost:11434/
+
+# 2. Pull the model
+ollama pull llama3.2
+
+# 3. Check OLLAMA_BASE_URL in .env
+# Should be: http://localhost:11434
+```
+
+### Port Already in Use
+
+**Error**: "Address already in use"
+
+```bash
+# Find process on port
+# Windows: netstat -ano | findstr :8000
+
+# Kill process (Windows)
+taskkill /PID <PID> /F
+
+# Or use different port
+python -m uvicorn app.main:app --reload --port 8001
+```
+
+### Module Not Found
+
+**Error**: "ModuleNotFoundError: No module named 'fastapi'"
+
+```bash
+# Ensure virtual environment is activated
+# Windows: venv\Scripts\activate
+# macOS/Linux: source venv/bin/activate
+
+# Reinstall dependencies
+pip install -r requirements.txt
+```
+
+### Database Connection String Issues
+
+**Verify connection string format:**
+
+```python
+# Format: Server=hostname\instance_name;Database=db_name;User Id=user;Password=pass
+
+# Examples:
+MSSQL_SERVER=localhost\SQLEXPRESS
+MSSQL_SERVER=COMPUTER_NAME\SQLEXPRESS
+MSSQL_SERVER=192.168.1.100\SQLEXPRESS
+```
+
+### Npm Install Issues
+
+**Error**: "npm ERR! code ERESOLVE"
+
+```bash
+# Clear npm cache
+npm cache clean --force
+
+# Install with legacy dependency resolution
+npm install --legacy-peer-deps
+```
+
+---
+
+## Development Workflow
+
+### Making Changes
+
+1. **Backend Changes**:
+   - Edit files in `backend/app/`
+   - Server auto-reloads (with `--reload` flag)
+   - Test with `python tests/` scripts
+
+2. **Frontend Changes**:
+   - Edit files in `frontend/src/`
+   - Dev server hot-reloads automatically
+   - Test in browser
+
+3. **Database Changes**:
+   - Create migration script in `backend/database/`
+   - Run migration
+   - Verify with schema check
+
+### Pushing to GitHub
+
+```bash
+# Stage changes
+git add .
+
+# Create meaningful commit
+git commit -m "feat: add new feature description"
+
+# Push to repository
+git push origin main
+
+# Or push to feature branch
+git push origin feature/feature-name
+```
+
+---
+
+## Deployment
+
+### Production Build
+
+```bash
+# Frontend
+cd frontend
+npm run build
+# Creates optimized build in dist/
+
+# Backend
+# No build needed, use with gunicorn in production
+```
+
+### Environment Variables for Production
+
+```bash
+# Backend
+JWT_SECRET=<generate-random-secret>
+OLLAMA_ENABLED=false  # Disable if using API only
+FRONTEND_ORIGIN=https://yourdomain.com
+
+# Frontend
+VITE_API_BASE_URL=https://api.yourdomain.com
+```
+
+---
+
+## Quick Reference
+
+### Important Directories
+
+| Directory | Purpose |
+|-----------|---------|
+| `backend/app/` | Main application code |
+| `backend/database/` | SQL migration scripts |
+| `backend/scripts/` | Utility scripts |
+| `backend/tests/` | Test scripts |
+| `frontend/src/` | React components and pages |
+| `frontend/public/` | Static assets |
+
+### Common Commands
+
+```bash
+# Backend
+pip install -r requirements.txt        # Install dependencies
+python scripts/migrate_database.py     # Run migrations
+python tests/test_quotation_flow.py    # Run tests
+python -m uvicorn app.main:app --reload  # Start server
+
+# Frontend
+npm install                     # Install dependencies
+npm run dev                     # Start dev server
+npm run build                   # Build for production
+npm run preview                 # Preview production build
+
+# Database
+sqlcmd -S SERVER\INSTANCE      # Connect to SQL Server
+python scripts/populate_*.py   # Populate test data
+```
+
+### Port Reference
+
+| Service | Port | URL |
+|---------|------|-----|
+| Ollama | 11434 | http://localhost:11434 |
+| Backend API | 8000 | http://localhost:8000 |
+| Frontend | 5173 | http://localhost:5173 |
+| SQL Server | 1433 | - |
+
+---
+
+## Next Steps
+
+1. ✅ Complete setup (this guide)
+2. ✅ Verify all services running
+3. ✅ Test login and features
+4. ✅ Run test scripts
+5. 📖 Read feature documentation:
+   - `backend/QUOTATION_FEATURE.md`
+   - `backend/PRICING_GUIDE.md`
+   - `backend/README.md`
+   - `frontend/README.md`
+
+---
+
+## Support
+
+- **Backend Issues**: Check `backend/README.md`
+- **Frontend Issues**: Check `frontend/README.md`
+- **Testing**: Check `backend/tests/README.md`
+- **Contact**: rshashidhar513@gmail.com
+
+---
+
+**Last Updated**: August 22, 2026

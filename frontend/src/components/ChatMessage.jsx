@@ -436,11 +436,8 @@ export default function ChatMessage({
             <p style={{ marginTop: 0, marginBottom: '12px', fontWeight: 'bold', color: '#c4622d' }}>
               📧 Contact Us
             </p>
-            <button 
-              onClick={() => {
-                const mailtoLink = `mailto:${companyEmail}?subject=Inquiry%20from%20CRM&body=Hello,%0A%0AI%20would%20like%20to%20inquire%20about%20your%20products%20and%20services.%0A%0AThank%20you.`
-                window.location.href = mailtoLink
-              }}
+            <a 
+              href={`mailto:${companyEmail}`}
               style={{
                 display: 'inline-block',
                 background: 'var(--accent-ore)',
@@ -451,9 +448,7 @@ export default function ChatMessage({
                 fontWeight: 600,
                 fontSize: '14px',
                 transition: 'all 0.2s',
-                cursor: 'pointer',
-                border: 'none',
-                marginBottom: '8px'
+                cursor: 'pointer'
               }}
               onMouseEnter={(e) => {
                 e.target.style.transform = 'scale(1.05)'
@@ -465,7 +460,7 @@ export default function ChatMessage({
               }}
             >
               ✉️ Send Email to {companyEmail}
-            </button>
+            </a>
             <p style={{ marginTop: '10px', marginBottom: 0, fontSize: '12px', color: 'var(--text-dim)' }}>
               Click the button above to open your email client and send us a message.
             </p>

@@ -7,7 +7,7 @@ const QUICK_ACTIONS = [
   'Place an Order',
   'Product Information',
   'Raise a Complaint',
-  'Contact Company via Email',
+  'Connect to Company',
 ]
 
 const WELCOME = "Hello! I'm your CRM assistant. How can I help you today?"
@@ -120,7 +120,7 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
       const isQuotationResponse = text === 'Ask for a Quotation' || action === 'Ask for a Quotation'
       
       // Check if response is for connect to company
-      const isConnectResponse = text === 'Contact Company via Email' || action === 'Contact Company via Email'
+      const isConnectResponse = text === 'Connect to Company' || action === 'Connect to Company' || text === 'Contact Company via Email' || action === 'Contact Company via Email'
       
       setMessages((prev) => [...prev, { 
         role: 'bot', 

@@ -350,7 +350,14 @@ def format_quotation_text(
     price_history: List[Tuple[float, datetime]],
     validity_days: int
 ) -> str:
-    """Generate a formatted text quotation for chat display (without price shown to customer)."""
+    """Generate a formatted text quotation for chat display."""
+    
+    history_text = ""
+    if price_history:
+        history_text = "\n\n**Recent Price History (Last 2-3 Sales):**\n"
+        for i, (price, date) in enumerate(price_history, 1):
+            date_str = date.strftime('%d-%m-%Y') if isinstance(date, datetime) else str(date)
+            history_text += f"• Sale {i}: ₹ {price:,.2f}/MT on {date_str}\n"
     
     quotation_text = f"""
 **QUOTATION GENERATED**
@@ -363,9 +370,12 @@ Validity: {validity_days} days
 **PRODUCT DETAILS:**
 Product: {product_name}
 Quantity: {quantity_mt:,.2f} MT
+Unit Price: ₹ {price_per_mt:,.2f} per MT
+**TOTAL AMOUNT: ₹ {total_amount:,.2f}**
+{history_text}
 
 **QUOTATION DOCUMENT:**
-A detailed PDF quotation has been generated and is attached. You can download it for your records and review the complete pricing details.
+A detailed PDF quotation has been generated and is attached. You can download it for your records.
 
 **NEXT STEPS:**
 Please review this quotation and let us know if you have any questions. 
