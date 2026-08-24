@@ -38,6 +38,7 @@ export default function ChatMessage({
   quotationQuantity,
   onQuotationQuantityChange,
   onSubmitQuotation,
+  companyEmail,
 }) {
   const isUser = role === 'user'
   
@@ -426,6 +427,43 @@ export default function ChatMessage({
             >
               {loading ? 'Submitting...' : 'Submit Complaint'}
             </button>
+          </div>
+        )}
+
+        {/* Company Email Display */}
+        {companyEmail && (
+          <div style={{ marginTop: '15px', background: 'rgba(196, 98, 45, 0.1)', padding: '12px', borderRadius: '8px', border: '1px solid var(--accent-ore)' }}>
+            <p style={{ marginTop: 0, marginBottom: '12px', fontWeight: 'bold', color: '#c4622d' }}>
+              📧 Contact Us
+            </p>
+            <a 
+              href={`mailto:${companyEmail}`}
+              style={{
+                display: 'inline-block',
+                background: 'var(--accent-ore)',
+                color: 'white',
+                padding: '10px 16px',
+                borderRadius: '6px',
+                textDecoration: 'none',
+                fontWeight: 600,
+                fontSize: '14px',
+                transition: 'all 0.2s',
+                cursor: 'pointer'
+              }}
+              onMouseEnter={(e) => {
+                e.target.style.transform = 'scale(1.05)'
+                e.target.style.boxShadow = '0 4px 12px rgba(196, 98, 45, 0.4)'
+              }}
+              onMouseLeave={(e) => {
+                e.target.style.transform = 'scale(1)'
+                e.target.style.boxShadow = 'none'
+              }}
+            >
+              ✉️ Send Email to {companyEmail}
+            </a>
+            <p style={{ marginTop: '10px', marginBottom: 0, fontSize: '12px', color: 'var(--text-dim)' }}>
+              Click the button above to open your email client and send us a message.
+            </p>
           </div>
         )}
       </div>

@@ -119,6 +119,9 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
       // Check if response is for quotation request
       const isQuotationResponse = text === 'Ask for a Quotation' || action === 'Ask for a Quotation'
       
+      // Check if response is for connect to company
+      const isConnectResponse = text === 'Connect to Company' || action === 'Connect to Company' || text === 'Contact Company via Email' || action === 'Contact Company via Email'
+      
       setMessages((prev) => [...prev, { 
         role: 'bot', 
         text: res.reply,
@@ -128,7 +131,8 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
         showOrderProducts: isOrderResponse,
         orderProducts: isOrderResponse && res.data ? res.data : [],
         showQuotationProducts: isQuotationResponse && res.data && res.data.products ? true : false,
-        quotationProducts: isQuotationResponse && res.data && res.data.products ? res.data.products : []
+        quotationProducts: isQuotationResponse && res.data && res.data.products ? res.data.products : [],
+        companyEmail: isConnectResponse && res.data ? res.data.email : null
       }])
     } catch (err) {
       const msg = err instanceof ApiError
@@ -451,6 +455,7 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
                 quotationQuantity={quotationDetails.quantity}
                 onQuotationQuantityChange={(value) => setQuotationDetails({ ...quotationDetails, quantity: value })}
                 onSubmitQuotation={submitQuotation}
+                companyEmail={m.companyEmail || null}
               />
             ))}
             {loading && (
