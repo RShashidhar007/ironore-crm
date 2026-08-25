@@ -70,3 +70,4 @@ def test_complaint_generation(complaint_id=None):
 if __name__ == "__main__":
     complaint_id = sys.argv[1] if len(sys.argv) > 1 else None
     test_complaint_generation(complaint_id)
+

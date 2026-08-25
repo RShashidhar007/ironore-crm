@@ -438,8 +438,10 @@ def regenerate_all_solutions(
     """
     # Find all complaints that meet criteria
     complaints = db.query(ComplaintMaster).filter(
-        ComplaintMaster.MarketingReview.ilike('approved'),
-        ComplaintMaster.PlantHeadReview.ilike('approved'),
+        ComplaintMaster.MarketingReview != None,
+        ComplaintMaster.MarketingReview != '',
+        ComplaintMaster.PlantHeadReview != None,
+        ComplaintMaster.PlantHeadReview != '',
         ComplaintMaster.RootCauseAnalysis != None,
         ComplaintMaster.RootCauseAnalysis != '',
         ComplaintMaster.CorrectivePreventiveAction != None,
@@ -470,6 +472,48 @@ def regenerate_all_solutions(
         "failed": len(failed_complaints),
         "failed_complaints": failed_complaints
     }
+
+
+@router.post("/force-regenerate-solution/{complaint_id}", response_model=ComplaintOut)
+def force_regenerate_solution(
+    complaint_id: str,
+    current_user: LoginMaster = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Force regenerate solution for a specific complaint, clearing the old one first.
+    Useful after editing complaint data directly in MSSQL.
+    
+    This will:
+    1. Find the complaint
+    2. Clear the existing solution
+    3. Regenerate it from current data
+    """
+    complaint = db.query(ComplaintMaster).filter(
+        ComplaintMaster.ComplaintID == complaint_id
+    ).first()
+    
+    if not complaint:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Complaint {complaint_id} not found"
+        )
+    
+    # Clear the existing solution
+    complaint.Solution = None
+    db.commit()
+    
+    # Regenerate
+    success = regenerate_solution_if_conditions_met(complaint)
+    
+    if success:
+        db.commit()
+        return ComplaintOut.from_orm(complaint)
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Cannot generate solution: not all required fields are filled (MarketingReview, PlantHeadReview, RCA, CAPA)"
+        )
 
 
 @router.post("/generate-solution", response_model=ComplaintOut)
