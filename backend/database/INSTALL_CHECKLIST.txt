@@ -1,0 +1,86 @@
+================================================================================
+SETUP CHECKLIST FOR AUTOMATIC SOLUTION GENERATION
+================================================================================
+
+REQUIREMENT 1: Database Trigger
+Status: NOT INSTALLED (This is why solutions aren't updating)
+
+ACTION NEEDED:
+1. Open SQL Server Management Studio (SSMS)
+2. Click: File → Open → File
+3. Select: backend\database\instant_solution_trigger.sql
+4. Click: Execute (or press F5)
+5. Wait for completion (you'll see success messages)
+
+VERIFY:
+Run this query in SSMS:
+  SELECT name FROM sys.triggers WHERE name LIKE '%Solution%';
+  
+Should return: TR_Complaints_TriggerSolutionGeneration
+
+================================================================================
+
+REQUIREMENT 2: Backend Server Running
+Status: LIKELY RUNNING (but verify)
+
+ACTION NEEDED:
+Open terminal and run:
+  cd d:\projects\ironore-crm\backend
+  python -m uvicorn app.main:app --reload
+
+Should see:
+  INFO:     Application startup complete
+  INFO:     Uvicorn running on http://127.0.0.1:8000
+
+================================================================================
+
+REQUIREMENT 3: Ollama Service Running
+Status: NEED TO VERIFY
+
+ACTION NEEDED:
+Make sure Ollama is running on your system
+Check: http://localhost:11434/api/tags
+
+If not running:
+  - Windows: Start Ollama application
+  - Or: ollama serve
+
+================================================================================
+
+AFTER SETUP:
+
+Test the system:
+
+1. Edit complaint in MSSQL:
+   - Right-click Complaints_Master → Edit Top 200 Rows
+   - Edit the review columns
+   - Click Update (Ctrl+Enter)
+
+2. Check trigger fired:
+   SELECT TOP 5 * FROM SolutionGenerationLog ORDER BY CreatedAt DESC;
+
+3. Wait 30 seconds for scheduler
+
+4. Check solution updated:
+   SELECT ComplaintID, Solution, UpdatedDate 
+   FROM Complaints_Master 
+   WHERE ComplaintID = 'YOUR_COMPLAINT_ID'
+   ORDER BY UpdatedDate DESC;
+
+================================================================================
+
+IF SOLUTION STILL NOT UPDATING:
+
+1. Run diagnostic:
+   python scripts/diagnose_solution_update.py
+
+2. Check logs:
+   SELECT * FROM SolutionGenerationLog ORDER BY CreatedAt DESC;
+
+3. Monitor in real-time:
+   python scripts/monitor_solutions.py
+
+4. Manual trigger:
+   python scripts/manual_trigger_solution.py
+
+================================================================================
