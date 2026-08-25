@@ -6,6 +6,7 @@ from .config import settings
 from .database import Base, engine
 from .routers import auth, customer, product, chat, complaint, notification, quotation
 from .solution_generator_scheduler import start_solution_generator, stop_solution_generator
+from .database_setup import setup_database_on_startup
 
 app = FastAPI(
     title="Iron Ore / Iron Pellet CRM Bot API",
@@ -36,6 +37,9 @@ async def on_startup():
     # SQL Server (DB_MODE=mssql) the six tables are assumed to already
     # exist and this call is a harmless no-op for existing tables.
     Base.metadata.create_all(bind=engine)
+    
+    # Automatically set up database components (trigger, procedure, tables, view)
+    setup_database_on_startup()
     
     # Start the solution generator scheduler
     try:
