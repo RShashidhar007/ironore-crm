@@ -81,6 +81,8 @@ def setup_database_components():
         BEGIN
             SET NOCOUNT ON;
             
+            -- Only mark as ready if ALL 4 fields are filled AND solution is currently NULL/empty
+            -- This prevents re-clearing the solution after it's been generated
             UPDATE Complaints_Master
             SET 
                 Solution = NULL,
@@ -95,7 +97,8 @@ def setup_database_components():
                 AND RootCauseAnalysis IS NOT NULL
                 AND RootCauseAnalysis != ''
                 AND CorrectivePreventiveAction IS NOT NULL
-                AND CorrectivePreventiveAction != '';
+                AND CorrectivePreventiveAction != ''
+                AND (Solution IS NULL OR Solution = '');
                 
             IF @@ROWCOUNT > 0
             BEGIN
