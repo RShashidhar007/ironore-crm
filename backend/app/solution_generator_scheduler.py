@@ -112,13 +112,13 @@ _scheduler: Optional[SolutionGeneratorScheduler] = None
 
 
 async def start_solution_generator():
-    """Start the solution generator scheduler."""
+    """Start the solution generator scheduler in background."""
     global _scheduler
     
     if _scheduler is None:
         _scheduler = SolutionGeneratorScheduler(check_interval_seconds=30)
     
-    # Run scheduler in the background
+    # Create task to run in background without blocking
     asyncio.create_task(_scheduler.start())
 
 

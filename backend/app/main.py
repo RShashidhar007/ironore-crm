@@ -31,7 +31,7 @@ app.include_router(quotation.router)
 
 
 @app.on_event("startup")
-def on_startup():
+async def on_startup():
     # In SQLite mode, make sure tables exist. Against a real
     # SQL Server (DB_MODE=mssql) the six tables are assumed to already
     # exist and this call is a harmless no-op for existing tables.
@@ -39,16 +39,16 @@ def on_startup():
     
     # Start the solution generator scheduler
     try:
-        asyncio.create_task(start_solution_generator())
+        await start_solution_generator()
     except Exception as e:
         print(f"Warning: Could not start solution generator scheduler: {e}")
 
 
 @app.on_event("shutdown")
-def on_shutdown():
+async def on_shutdown():
     # Stop the solution generator scheduler
     try:
-        asyncio.run(stop_solution_generator())
+        await stop_solution_generator()
     except Exception:
         pass
 
