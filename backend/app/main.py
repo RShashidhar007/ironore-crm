@@ -1,9 +1,11 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+import asyncio
 
 from .config import settings
 from .database import Base, engine
 from .routers import auth, customer, product, chat, complaint, notification, quotation
+from .solution_generator_scheduler import start_solution_generator, stop_solution_generator
 
 app = FastAPI(
     title="Iron Ore / Iron Pellet CRM Bot API",
@@ -34,6 +36,21 @@ def on_startup():
     # SQL Server (DB_MODE=mssql) the six tables are assumed to already
     # exist and this call is a harmless no-op for existing tables.
     Base.metadata.create_all(bind=engine)
+    
+    # Start the solution generator scheduler
+    try:
+        asyncio.create_task(start_solution_generator())
+    except Exception as e:
+        print(f"Warning: Could not start solution generator scheduler: {e}")
+
+
+@app.on_event("shutdown")
+def on_shutdown():
+    # Stop the solution generator scheduler
+    try:
+        asyncio.run(stop_solution_generator())
+    except Exception:
+        pass
 
 
 @app.get("/api/health")
