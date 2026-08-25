@@ -1,5 +1,5 @@
 from typing import Optional, List, Any
-from datetime import date
+from datetime import date, datetime
 from pydantic import BaseModel
 
 
@@ -125,18 +125,20 @@ class ComplaintOut(BaseModel):
     PONumber: Optional[str] = None
     DispatchDate: Optional[date] = None
     RootCauseAnalysis: Optional[str] = None
+    RootCauseAnalysisDate: Optional[datetime] = None
     CorrectivePreventiveAction: Optional[str] = None
+    CorrectivePreventiveActionDate: Optional[datetime] = None
     MarketingReview: Optional[str] = None
-    MarketingReviewDate: Optional[date] = None
+    MarketingReviewDate: Optional[datetime] = None
     PlantHeadReview: Optional[str] = None
-    PlantHeadReviewDate: Optional[date] = None
+    PlantHeadReviewDate: Optional[datetime] = None
     HODReview: Optional[str] = None
     Solution: Optional[str] = None
     Status: Optional[str] = None
     CreatedBy: Optional[str] = None
-    CreatedDate: Optional[date] = None
+    CreatedDate: Optional[datetime] = None
     UpdatedBy: Optional[str] = None
-    UpdatedDate: Optional[date] = None
+    UpdatedDate: Optional[datetime] = None
 
     model_config = {"from_attributes": True}
 
