@@ -63,29 +63,26 @@ def generate_solution_with_approvals(
     plant_head_review: Optional[str] = None
 ):
     """
-    Generate solution if both marketing head and plant head have approved.
+    Generate solution if both marketing head and plant head have reviews.
     Solution is based on:
     - Root cause analysis
     - Corrective/preventive action
-    - Marketing head review (including any remarks/comments)
-    - Plant head review (including any remarks/comments)
+    - Marketing head review (any remarks/comments)
+    - Plant head review (any remarks/comments)
     
-    Note: MarketingReview and PlantHeadReview can contain:
+    Both fields must have content (implicit approval if non-empty)
+    They can contain:
     - Just "approved"
-    - "approved" with remarks: "approved - remarks here"
-    - Just remarks (if manually edited in database)
+    - "approved - remarks"
+    - Just remarks (implicit approval)
     """
     
-    # Check if both marketing head and plant head approved
-    # They can be "approved" or start with "approved"
-    marketing_text = (complaint.MarketingReview or "").lower().strip()
-    plant_text = (complaint.PlantHeadReview or "").lower().strip()
+    # Check if both have reviews
+    has_marketing_review = marketing_head_review and marketing_head_review.strip()
+    has_plant_review = plant_head_review and plant_head_review.strip()
     
-    marketing_approved = marketing_text.startswith("approved")
-    plant_approved = plant_text.startswith("approved")
-    
-    if not marketing_approved or not plant_approved:
-        return None, "Both Marketing Head and Plant Head must approve (status must contain 'approved') before solution can be generated."
+    if not has_marketing_review or not has_plant_review:
+        return None, "Both Marketing Head and Plant Head must provide reviews before solution can be generated."
     
     # Build the prompt with all inputs including reviews
     verified_data = f"""Complaint Analysis:
@@ -100,37 +97,47 @@ Root Cause Analysis:
 Corrective and Preventive Action:
 {corrective_preventive_action}"""
     
-    # Add marketing head review/remarks if it has more than just "approved"
-    if marketing_head_review:
-        marketing_review_text = marketing_head_review.lower().strip()
-        # Extract remarks if they exist (e.g., "approved - remarks" or just "remarks")
-        if marketing_review_text != "approved":
-            if " - " in marketing_review_text:
-                remarks = marketing_review_text.split(" - ", 1)[1]
-            else:
-                remarks = marketing_review_text.replace("approved", "").strip()
-            
+    # Add marketing head review/remarks
+    if has_marketing_review:
+        marketing_review_text = marketing_head_review.strip()
+        # Remove "approved" prefix if it exists to get just the remarks
+        if marketing_review_text.lower().startswith("approved"):
+            # Remove "approved" and the separator
+            remarks = marketing_review_text[8:].strip()  # Remove "approved"
+            if remarks.startswith("-"):
+                remarks = remarks[1:].strip()  # Remove "-" separator
             if remarks:
                 verified_data += f"""
 
 Marketing Head Review:
 {remarks}"""
+        else:
+            # Just remarks, no "approved" prefix
+            verified_data += f"""
+
+Marketing Head Review:
+{marketing_review_text}"""
     
-    # Add plant head review/remarks if it has more than just "approved"
-    if plant_head_review:
-        plant_review_text = plant_head_review.lower().strip()
-        # Extract remarks if they exist (e.g., "approved - remarks" or just "remarks")
-        if plant_review_text != "approved":
-            if " - " in plant_review_text:
-                remarks = plant_review_text.split(" - ", 1)[1]
-            else:
-                remarks = plant_review_text.replace("approved", "").strip()
-            
+    # Add plant head review/remarks
+    if has_plant_review:
+        plant_review_text = plant_head_review.strip()
+        # Remove "approved" prefix if it exists to get just the remarks
+        if plant_review_text.lower().startswith("approved"):
+            # Remove "approved" and the separator
+            remarks = plant_review_text[8:].strip()  # Remove "approved"
+            if remarks.startswith("-"):
+                remarks = remarks[1:].strip()  # Remove "-" separator
             if remarks:
                 verified_data += f"""
 
 Plant Head Review:
 {remarks}"""
+        else:
+            # Just remarks, no "approved" prefix
+            verified_data += f"""
+
+Plant Head Review:
+{plant_review_text}"""
     
     verified_data += "\n\nPlease generate the final solution based on the above analysis, actions, and reviews."
     
@@ -163,20 +170,23 @@ SOLUTION: [your solution]"""
 def regenerate_solution_if_conditions_met(complaint: ComplaintMaster):
     """
     Helper function to regenerate solution if all conditions are met:
-    - Both Marketing and Plant Head approved (can contain remarks)
+    - Both Marketing and Plant Head have reviews (with or without "approved")
     - RCA and CAPA exist
-    """
-    # Check if approved (can be "approved" or "approved - remarks" or include remarks)
-    marketing_text = (complaint.MarketingReview or "").lower().strip()
-    plant_text = (complaint.PlantHeadReview or "").lower().strip()
     
-    marketing_approved = marketing_text.startswith("approved") if marketing_text else False
-    plant_approved = plant_text.startswith("approved") if plant_text else False
+    Note: Both Marketing and Plant Head fields must have SOME value (not null/empty)
+    They can be:
+    - "approved"
+    - "approved - remarks"
+    - Just remarks (implicit approval)
+    """
+    # Check if both have reviews (implicit or explicit approval)
+    has_marketing_review = complaint.MarketingReview and complaint.MarketingReview.strip()
+    has_plant_review = complaint.PlantHeadReview and complaint.PlantHeadReview.strip()
     
     has_rca = complaint.RootCauseAnalysis and complaint.RootCauseAnalysis.strip()
     has_capa = complaint.CorrectivePreventiveAction and complaint.CorrectivePreventiveAction.strip()
     
-    if marketing_approved and plant_approved and has_rca and has_capa:
+    if has_marketing_review and has_plant_review and has_rca and has_capa:
         solution, error = generate_solution_with_approvals(
             complaint,
             complaint.RootCauseAnalysis,
@@ -369,7 +379,7 @@ def trigger_solution_generation(
     """
     Manually trigger solution generation for testing/debugging.
     Useful when you want to regenerate solution with existing data.
-    Supports remarks in MarketingReview and PlantHeadReview fields.
+    Both Marketing Head and Plant Head must have reviews (with or without "approved" text).
     """
     complaint = db.query(ComplaintMaster).filter(
         ComplaintMaster.ComplaintID == complaint_id
@@ -383,20 +393,16 @@ def trigger_solution_generation(
     
     if not success:
         # Return what conditions are missing
-        marketing_text = (complaint.MarketingReview or "").lower().strip()
-        plant_text = (complaint.PlantHeadReview or "").lower().strip()
-        
-        marketing_approved = marketing_text.startswith("approved") if marketing_text else False
-        plant_approved = plant_text.startswith("approved") if plant_text else False
-        
+        has_marketing_review = complaint.MarketingReview and complaint.MarketingReview.strip()
+        has_plant_review = complaint.PlantHeadReview and complaint.PlantHeadReview.strip()
         has_rca = complaint.RootCauseAnalysis and complaint.RootCauseAnalysis.strip()
         has_capa = complaint.CorrectivePreventiveAction and complaint.CorrectivePreventiveAction.strip()
         
         missing = []
-        if not marketing_approved:
-            missing.append(f"Marketing approval (current: '{complaint.MarketingReview}')")
-        if not plant_approved:
-            missing.append(f"Plant Head approval (current: '{complaint.PlantHeadReview}')")
+        if not has_marketing_review:
+            missing.append("Marketing Head Review")
+        if not has_plant_review:
+            missing.append("Plant Head Review")
         if not has_rca:
             missing.append("Root Cause Analysis")
         if not has_capa:
