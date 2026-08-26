@@ -58,28 +58,59 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
       recognitionRef.current.lang = 'en-US'
 
       recognitionRef.current.onresult = (event) => {
-        const transcript = event.results[0][0].transcript
+        let transcript = event.results[0][0].transcript
         const field = selectedFieldRef.current
-        if (field === 'poNumber') {
+        
+        console.log('[Speech Recognition] Transcript:', transcript, 'Target field:', field)
+        
+        // Convert word numbers to digits for quantity fields
+        if (field === 'quotationQuantity' || field === 'orderQuantity') {
+          // Try to convert common spoken numbers to digits
+          const wordToNum = {
+            'zero': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4', 
+            'five': '5', 'six': '6', 'seven': '7', 'eight': '8', 'nine': '9',
+            'ten': '10', 'twenty': '20', 'thirty': '30', 'forty': '40', 'fifty': '50',
+            'hundred': '00', 'thousand': '000'
+          }
+          
+          const lowerTranscript = transcript.toLowerCase().trim()
+          // If it's a word number, try to convert
+          if (wordToNum[lowerTranscript]) {
+            transcript = wordToNum[lowerTranscript]
+            console.log('[Speech Recognition] Converted to number:', transcript)
+          }
+        }
+        
+        // Route to the specific field only, don't put in input
+        if (field === 'quotationQuantity') {
+          console.log('[Speech Recognition] Updating quotationDetails.quantity to:', transcript)
+          setQuotationDetails(prev => ({ 
+            ...prev, 
+            quantity: transcript 
+          }))
+        } else if (field === 'orderQuantity') {
+          console.log('[Speech Recognition] Updating orderDetails.quantity to:', transcript)
+          setOrderDetails(prev => ({ 
+            ...prev, 
+            quantity: transcript 
+          }))
+        } else if (field === 'poNumber') {
           setComplaintDetails(prev => ({ ...prev, poNumber: transcript }))
-          setSelectedField(null)
-          selectedFieldRef.current = null
         } else if (field === 'dispatchDate') {
           setComplaintDetails(prev => ({ ...prev, dispatchDate: transcript }))
-          setSelectedField(null)
-          selectedFieldRef.current = null
         } else if (field === 'description') {
           setComplaintDetails(prev => ({ ...prev, description: transcript }))
-          setSelectedField(null)
-          selectedFieldRef.current = null
         } else if (field === 'complaintIdInput') {
           setComplaintDetails(prev => ({ ...prev, complaintIdInput: transcript }))
-          setSelectedField(null)
-          selectedFieldRef.current = null
         } else {
+          // Only put in input field for chat messages
+          console.log('[Speech Recognition] Updating input field (chat) to:', transcript)
           setInput(transcript)
         }
+        
         setIsListening(false)
+        setSelectedField(null)
+        selectedFieldRef.current = null
       }
 
       recognitionRef.current.onerror = (event) => {
@@ -298,9 +329,26 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
     if (isListening) {
       recognitionRef.current.stop()
       setIsListening(false)
-      setSelectedField(null)
-      selectedFieldRef.current = null
     } else {
+      // For quotation form - set field to capture quantity
+      if (quotationDetails.showForm && quotationDetails.selectedProduct) {
+        console.log('[toggleListening] Setting quotationQuantity field')
+        setSelectedField('quotationQuantity')
+        selectedFieldRef.current = 'quotationQuantity'
+      } 
+      // For order form - set field to capture quantity
+      else if (orderDetails.selectedProduct) {
+        console.log('[toggleListening] Setting orderQuantity field')
+        setSelectedField('orderQuantity')
+        selectedFieldRef.current = 'orderQuantity'
+      } 
+      // Default to chat input
+      else {
+        console.log('[toggleListening] No form active, defaulting to chat input')
+        setSelectedField(null)
+        selectedFieldRef.current = null
+      }
+      console.log('[toggleListening] selectedFieldRef.current =', selectedFieldRef.current)
       recognitionRef.current.start()
       setIsListening(true)
     }
@@ -490,7 +538,13 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
                 {isListening ? '🎤' : '🎙️'}
               </button>
               <textarea
-                placeholder={selectedField === null ? "Type your message…" : "Listening to " + selectedField + "..."}
+                placeholder={
+                  selectedField === 'quotationQuantity' 
+                    ? "Listening for quotation quantity..." 
+                    : selectedField === 'orderQuantity'
+                    ? "Listening for order quantity..."
+                    : "Type your message…"
+                }
                 value={input}
                 onChange={(e) => setInput(e.target.value)}
                 onKeyDown={handleKeyDown}
@@ -498,8 +552,8 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
                 rows={1}
                 style={{
                   flex: 1,
-                  outline: selectedField === null && input ? '2px solid var(--accent-ore)' : 'none',
-                  boxShadow: selectedField === null && input ? '0 0 0 2px rgba(196, 98, 45, 0.3)' : 'none'
+                  outline: input ? '2px solid var(--accent-ore)' : 'none',
+                  boxShadow: input ? '0 0 0 2px rgba(196, 98, 45, 0.3)' : 'none'
                 }}
               />
             </div>

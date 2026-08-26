@@ -146,18 +146,16 @@ export default function ChatMessage({
             <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', marginTop: '10px', marginBottom: '4px', color: 'var(--text-dim)' }}>Quantity (MT)</label>
             <input 
               type="number" 
-              placeholder="Enter quantity in MT"
+              placeholder="Speak or type quantity in MT"
               value={orderQuantity}
               onChange={(e) => onOrderQuantityChange(e.target.value)}
-              onFocus={() => onFieldSelect('orderQuantity')}
               disabled={loading}
               min="0"
               step="0.01"
               style={{ 
-                width: '100%', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', 
-                padding: '8px', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box',
-                outline: selectedField === 'orderQuantity' ? '2px solid var(--accent-ore)' : 'none',
-                boxShadow: selectedField === 'orderQuantity' ? '0 0 0 2px rgba(196, 98, 45, 0.3)' : 'none'
+                width: '100%',
+                background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', 
+                padding: '8px', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box'
               }}
             />
             
@@ -193,18 +191,16 @@ export default function ChatMessage({
             <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', marginTop: '10px', marginBottom: '4px', color: 'var(--text-dim)' }}>Quantity (MT)</label>
             <input 
               type="number" 
-              placeholder="Enter quantity in MT"
+              placeholder="Speak or type quantity in MT"
               value={quotationQuantity}
               onChange={(e) => onQuotationQuantityChange(e.target.value)}
-              onFocus={() => onFieldSelect('quotationQuantity')}
               disabled={loading}
               min="0"
               step="0.01"
               style={{ 
-                width: '100%', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', 
-                padding: '8px', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box',
-                outline: selectedField === 'quotationQuantity' ? '2px solid var(--accent-ore)' : 'none',
-                boxShadow: selectedField === 'quotationQuantity' ? '0 0 0 2px rgba(196, 98, 45, 0.3)' : 'none'
+                width: '100%',
+                background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', 
+                padding: '8px', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box'
               }}
             />
             
@@ -300,20 +296,20 @@ export default function ChatMessage({
               Track Complaint
             </p>
             <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', marginTop: '10px', marginBottom: '4px', color: 'var(--text-dim)' }}>Complaint ID</label>
-            <input 
-              type="text" 
-              placeholder="e.g., CMP-20240820-0001"
-              value={complaintDetails.complaintIdInput}
-              onChange={(e) => onComplaintIdChange(e.target.value)}
-              onFocus={() => onFieldSelect('complaintIdInput')}
-              disabled={loading}
-              style={{ 
-                width: '100%', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', 
-                padding: '8px', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box',
-                outline: selectedField === 'complaintIdInput' ? '2px solid var(--accent-ore)' : 'none',
-                boxShadow: selectedField === 'complaintIdInput' ? '0 0 0 2px rgba(196, 98, 45, 0.3)' : 'none'
-              }}
-            />
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <input 
+                type="text" 
+                placeholder="e.g., CMP-20240820-0001"
+                value={complaintDetails.complaintIdInput}
+                onChange={(e) => onComplaintIdChange(e.target.value)}
+                disabled={loading}
+                style={{ 
+                  flex: 1,
+                  background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', 
+                  padding: '8px', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box'
+                }}
+              />
+            </div>
             <button 
               onClick={() => onSubmitComplaintId('submit')}
               disabled={loading || !complaintDetails.complaintIdInput.trim()}
@@ -363,51 +359,51 @@ export default function ChatMessage({
             </p>
             
             <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', marginTop: '10px', marginBottom: '4px', color: 'var(--text-dim)' }}>PO Number</label>
-            <input 
-              type="text" 
-              placeholder="Enter PO number"
-              value={complaintDetails.poNumber}
-              onChange={(e) => onComplaintDetailsChange({ ...complaintDetails, poNumber: e.target.value })}
-              onFocus={() => onFieldSelect('poNumber')}
-              disabled={loading}
-              style={{ 
-                width: '100%', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', 
-                padding: '8px', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box',
-                outline: selectedField === 'poNumber' ? '2px solid var(--accent-ore)' : 'none',
-                boxShadow: selectedField === 'poNumber' ? '0 0 0 2px rgba(196, 98, 45, 0.3)' : 'none'
-              }}
-            />
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <input 
+                type="text" 
+                placeholder="Enter PO number"
+                value={complaintDetails.poNumber}
+                onChange={(e) => onComplaintDetailsChange({ ...complaintDetails, poNumber: e.target.value })}
+                disabled={loading}
+                style={{ 
+                  flex: 1,
+                  background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', 
+                  padding: '8px', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box'
+                }}
+              />
+            </div>
             
             <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', marginTop: '10px', marginBottom: '4px', color: 'var(--text-dim)' }}>Dispatch Date</label>
-            <input 
-              type="date" 
-              value={complaintDetails.dispatchDate}
-              onChange={(e) => onComplaintDetailsChange({ ...complaintDetails, dispatchDate: e.target.value })}
-              onFocus={() => onFieldSelect('dispatchDate')}
-              disabled={loading}
-              style={{ 
-                width: '100%', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', 
-                padding: '8px', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box',
-                outline: selectedField === 'dispatchDate' ? '2px solid var(--accent-ore)' : 'none',
-                boxShadow: selectedField === 'dispatchDate' ? '0 0 0 2px rgba(196, 98, 45, 0.3)' : 'none'
-              }}
-            />
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+              <input 
+                type="date" 
+                value={complaintDetails.dispatchDate}
+                onChange={(e) => onComplaintDetailsChange({ ...complaintDetails, dispatchDate: e.target.value })}
+                disabled={loading}
+                style={{ 
+                  flex: 1,
+                  background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', 
+                  padding: '8px', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box'
+                }}
+              />
+            </div>
             
             <label style={{ display: 'block', fontSize: '11px', textTransform: 'uppercase', marginTop: '10px', marginBottom: '4px', color: 'var(--text-dim)' }}>Complaint Description</label>
-            <textarea
-              placeholder="Describe the issue in detail..."
-              value={complaintDetails.description}
-              onChange={(e) => onComplaintDetailsChange({ ...complaintDetails, description: e.target.value })}
-              onFocus={() => onFieldSelect('description')}
-              rows={3}
-              disabled={loading}
-              style={{ 
-                width: '100%', background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', 
-                padding: '8px', borderRadius: '6px', fontSize: '13px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit',
-                outline: selectedField === 'description' ? '2px solid var(--accent-ore)' : 'none',
-                boxShadow: selectedField === 'description' ? '0 0 0 2px rgba(196, 98, 45, 0.3)' : 'none'
-              }}
-            />
+            <div style={{ display: 'flex', gap: '8px', alignItems: 'flex-start' }}>
+              <textarea
+                placeholder="Describe the issue in detail..."
+                value={complaintDetails.description}
+                onChange={(e) => onComplaintDetailsChange({ ...complaintDetails, description: e.target.value })}
+                rows={3}
+                disabled={loading}
+                style={{ 
+                  flex: 1,
+                  background: 'var(--surface)', border: '1px solid var(--border)', color: 'var(--text)', 
+                  padding: '8px', borderRadius: '6px', fontSize: '13px', resize: 'vertical', boxSizing: 'border-box', fontFamily: 'inherit'
+                }}
+              />
+            </div>
             
             <button 
               onClick={() => onSubmitComplaint(selectedCategory, complaintDetails.description, complaintDetails.poNumber, complaintDetails.dispatchDate)}

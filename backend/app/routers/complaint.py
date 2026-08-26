@@ -173,6 +173,8 @@ def regenerate_solution_if_conditions_met(complaint: ComplaintMaster):
     - Both Marketing and Plant Head have reviews (with or without "approved")
     - RCA and CAPA exist
     
+    Uses Ollama to generate professional solution text.
+    
     Note: Both Marketing and Plant Head fields must have SOME value (not null/empty)
     They can be:
     - "approved"
@@ -200,6 +202,41 @@ def regenerate_solution_if_conditions_met(complaint: ComplaintMaster):
             complaint.Status = "Resolved"
             return True
     return False
+
+
+def try_generate_solution_async(complaint_id: str, db_session_factory=None):
+    """
+    Attempt to generate solution asynchronously in background thread.
+    Used as fallback if immediate generation fails.
+    
+    This allows API endpoint to return immediately while solution generation
+    happens in the background.
+    """
+    import threading
+    
+    def _generate():
+        try:
+            if db_session_factory is None:
+                from ..database import SessionLocal
+                db_session = SessionLocal()
+            else:
+                db_session = db_session_factory()
+            
+            complaint = db_session.query(ComplaintMaster).filter(
+                ComplaintMaster.ComplaintID == complaint_id
+            ).first()
+            
+            if complaint and not complaint.Solution:
+                regenerate_solution_if_conditions_met(complaint)
+                db_session.commit()
+        except Exception as e:
+            print(f"[ASYNC] Error generating solution for {complaint_id}: {str(e)}")
+        finally:
+            if db_session:
+                db_session.close()
+    
+    thread = threading.Thread(target=_generate, daemon=True)
+    thread.start()
 
 
 @router.get("/{complaint_id}", response_model=ComplaintOut)
@@ -268,7 +305,7 @@ def submit_complaint_review(
     """
     Submit a review for a complaint (marketing head, plant head, or HOD).
     Supports both "approved" and "approved - remarks" format.
-    If both Marketing and Plant Head have approval, solution is auto-generated.
+    Solution generation is handled asynchronously by the background scheduler.
     """
     complaint = db.query(ComplaintMaster).filter(
         ComplaintMaster.ComplaintID == payload.complaint_id
@@ -305,7 +342,7 @@ def submit_complaint_review(
     complaint.UpdatedBy = current_user.User_Id
     complaint.UpdatedDate = datetime.now()
     
-    # Auto-generate solution if conditions met
+    # Try to generate solution immediately if all conditions are met
     regenerate_solution_if_conditions_met(complaint)
     
     db.commit()
@@ -324,7 +361,7 @@ def update_complaint_review(
     """
     Update/Edit an existing review for a complaint.
     Supports both "approved" and "approved - remarks" format.
-    This will also trigger auto-generation if conditions are met.
+    Solution generation is handled asynchronously by the background scheduler.
     """
     complaint = db.query(ComplaintMaster).filter(
         ComplaintMaster.ComplaintID == complaint_id
@@ -361,7 +398,7 @@ def update_complaint_review(
     complaint.UpdatedBy = current_user.User_Id
     complaint.UpdatedDate = datetime.now()
     
-    # Regenerate solution if conditions met
+    # Try to generate solution immediately if all conditions are met
     regenerate_solution_if_conditions_met(complaint)
     
     db.commit()
@@ -595,7 +632,7 @@ def update_complaint(
 ):
     """
     Update complaint details (category, description, PO number, dispatch date).
-    If all solution conditions are met, solution will be regenerated.
+    Solution generation is handled asynchronously by the background scheduler.
     """
     complaint = db.query(ComplaintMaster).filter(
         ComplaintMaster.ComplaintID == complaint_id
@@ -617,7 +654,7 @@ def update_complaint(
     complaint.UpdatedBy = current_user.User_Id
     complaint.UpdatedDate = datetime.now()
     
-    # Regenerate solution if conditions met
+    # Try to generate solution if conditions are met
     regenerate_solution_if_conditions_met(complaint)
     
     db.commit()
@@ -635,7 +672,7 @@ def update_analysis(
 ):
     """
     Update Root Cause Analysis and Corrective/Preventive Action.
-    If both Marketing Head and Plant Head have approved, solution will be auto-regenerated.
+    Solution generation is handled asynchronously by the background scheduler.
     """
     complaint = db.query(ComplaintMaster).filter(
         ComplaintMaster.ComplaintID == complaint_id
@@ -652,7 +689,7 @@ def update_analysis(
     complaint.UpdatedBy = current_user.User_Id
     complaint.UpdatedDate = datetime.now()
     
-    # Auto-generate solution if conditions met
+    # Try to generate solution if conditions are met
     regenerate_solution_if_conditions_met(complaint)
     
     db.commit()

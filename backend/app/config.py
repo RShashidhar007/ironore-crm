@@ -64,6 +64,7 @@ class Settings(BaseSettings):
                     f"&Trusted_Connection=yes"
                     f"&Encrypt={self.MSSQL_ENCRYPT}"
                     f"&TrustServerCertificate={self.MSSQL_TRUST_SERVER_CERT}"
+                    f"&Connection+Timeout=10"
                 )
             else:
                 # URL-encode username and password to handle special characters
@@ -75,6 +76,7 @@ class Settings(BaseSettings):
                     f"?driver={driver}"
                     f"&Encrypt={self.MSSQL_ENCRYPT}"
                     f"&TrustServerCertificate={self.MSSQL_TRUST_SERVER_CERT}"
+                    f"&Connection+Timeout=10"
                 )
         return f"sqlite:///{self.SQLITE_PATH}"
 

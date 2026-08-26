@@ -51,12 +51,10 @@ def calculate_average_price(price_history: List[Tuple[float, datetime]]) -> Opti
 
 
 def generate_quotation_number(db: Session) -> str:
-    """Generate a unique quotation number in format: QT-YYYY-MM-###"""
-    today = datetime.now()
-    count = db.query(QuotationMaster).filter(
-        QuotationMaster.CreatedDate >= today.replace(hour=0, minute=0, second=0, microsecond=0)
-    ).count() + 1
-    return f"QT-{today.year}-{today.month:02d}-{count:03d}"
+    """Generate a unique quotation number in format: QT-YYYY-MM-DDHHMMSS"""
+    now = datetime.now()
+    # Use timestamp to ensure uniqueness even within the same second
+    return f"QT-{now.strftime('%Y%m%d%H%M%S')}-{now.microsecond:06d}"
 
 
 def create_quotation(
@@ -78,74 +76,79 @@ def create_quotation(
     3. Create quotation record
     4. Generate PDF
     """
-    # Get price history
-    price_history = get_price_history(db, product_id, limit=3)
-    avg_price = calculate_average_price(price_history)
-    
-    # If no history, use the last produced item's initial price
-    if not price_history:
-        latest_inventory = db.query(InventoryMaster).filter(
-            InventoryMaster.PID == product_id,
-            InventoryMaster.Category == 'Produced'
-        ).order_by(desc(InventoryMaster.ProducedDate)).first()
+    try:
+        # Get price history
+        price_history = get_price_history(db, product_id, limit=3)
+        avg_price = calculate_average_price(price_history)
         
-        if latest_inventory and latest_inventory.InitialPrice:
-            avg_price = float(latest_inventory.InitialPrice)
-        else:
-            avg_price = 0.0
-    
-    # Calculate total amount (ensure both are floats)
-    total_amount = float(quantity_mt) * float(avg_price)
-    
-    # Generate quotation number
-    quotation_number = generate_quotation_number(db)
-    
-    # Create quotation record
-    now = datetime.now()
-    expiry_date = now + timedelta(days=validity_days)
-    
-    quotation = QuotationMaster(
-        QuotationNumber=quotation_number,
-        CID=customer_id,
-        PID=product_id,
-        ProductName=product_name,
-        QuantityMT=quantity_mt,
-        PricePerMT=avg_price,
-        TotalAmount=total_amount,
-        ValidityDays=validity_days,
-        Notes=notes,
-        Status='Generated',
-        CreatedBy=created_by,
-        CreatedDate=now,
-        ExpiryDate=expiry_date
-    )
-    
-    db.add(quotation)
-    db.flush()  # Get the ID without committing
-    
-    # Generate PDF
-    pdf_bytes = generate_quotation_pdf(
-        quotation_id=quotation.QuotationID,
-        quotation_number=quotation_number,
-        customer_id=customer_id,
-        product_name=product_name,
-        quantity_mt=quantity_mt,
-        price_per_mt=avg_price,
-        total_amount=total_amount,
-        price_history=price_history,
-        validity_days=validity_days,
-        notes=notes,
-        db=db
-    )
-    
-    # Save PDF to file
-    pdf_path = save_quotation_pdf(pdf_bytes, quotation_number)
-    quotation.PDFFilePath = str(pdf_path)
-    
-    db.add(quotation)
-    db.commit()
-    
-    return quotation
+        # If no history, use the last produced item's initial price
+        if not price_history:
+            latest_inventory = db.query(InventoryMaster).filter(
+                InventoryMaster.PID == product_id,
+                InventoryMaster.Category == 'Produced'
+            ).order_by(desc(InventoryMaster.ProducedDate)).first()
+            
+            if latest_inventory and latest_inventory.InitialPrice:
+                avg_price = float(latest_inventory.InitialPrice)
+            else:
+                avg_price = 0.0
+        
+        # Calculate total amount (ensure both are floats)
+        total_amount = float(quantity_mt) * float(avg_price)
+        
+        # Generate quotation number
+        quotation_number = generate_quotation_number(db)
+        
+        # Create quotation record
+        now = datetime.now()
+        expiry_date = now + timedelta(days=validity_days)
+        
+        quotation = QuotationMaster(
+            QuotationNumber=quotation_number,
+            CID=customer_id,
+            PID=product_id,
+            ProductName=product_name,
+            QuantityMT=quantity_mt,
+            PricePerMT=avg_price,
+            TotalAmount=total_amount,
+            ValidityDays=validity_days,
+            Notes=notes,
+            Status='Generated',
+            CreatedBy=created_by,
+            CreatedDate=now,
+            ExpiryDate=expiry_date
+        )
+        
+        db.add(quotation)
+        db.flush()  # Get the ID without committing
+        
+        # Generate PDF
+        pdf_bytes = generate_quotation_pdf(
+            quotation_id=quotation.QuotationID,
+            quotation_number=quotation_number,
+            customer_id=customer_id,
+            product_name=product_name,
+            quantity_mt=quantity_mt,
+            price_per_mt=avg_price,
+            total_amount=total_amount,
+            price_history=price_history,
+            validity_days=validity_days,
+            notes=notes,
+            db=db
+        )
+        
+        # Save PDF to file
+        pdf_path = save_quotation_pdf(pdf_bytes, quotation_number)
+        quotation.PDFFilePath = str(pdf_path)
+        
+        db.add(quotation)
+        db.commit()
+        
+        return quotation
+    except Exception as e:
+        # Rollback on error to clean the session state
+        db.rollback()
+        raise
 
 
 def generate_quotation_pdf(
