@@ -1,6 +1,37 @@
 # Docker Setup Guide - IronOre CRM
 
-Complete guide for building and running the IronOre CRM application using Docker.
+Two Docker configurations available:
+
+## 🤖 Option 1: Chatbot-Only (Minimal)
+Lightweight setup with just the floating chatbot button and backend API.
+- **Perfect for:** Embedding in websites, microservices, quick deployment
+- **Size:** ~160MB total
+- **Services:** Backend API + Chatbot UI
+- **Startup:** ~5-10 seconds
+- **See:** `CHATBOT_DOCKER.md`
+
+## 🏢 Option 2: Full Stack
+Complete deployment with frontend, backend, and database.
+- **Perfect for:** Full CRM application, enterprise deployment
+- **Size:** ~2.3GB total
+- **Services:** Backend API + Frontend UI + Database
+- **Startup:** ~15-20 seconds
+- **See:** `DOCKER_README.md`
+
+---
+
+## Quick Start (Choose One)
+
+### Chatbot-Only (Recommended for simplicity)
+```bash
+cp .env.docker .env
+# Edit .env with your database connection
+docker-compose up -d
+# Open http://localhost
+```
+
+### Full Stack
+See `DOCKER_README.md` for complete instructions
 
 ## 📋 Prerequisites
 

@@ -1,51 +1,32 @@
-# Frontend Dockerfile - React with Vite
-# Stage 1: Build stage
-FROM node:20-alpine as builder
-
-WORKDIR /app
-
-# Copy package files
-COPY package*.json ./
-
-# Install dependencies
-RUN npm ci
-
-# Copy source code
-COPY src/ ./src/
-COPY public/ ./public/
-COPY index.html vite.config.js ./
-
-# Build the application
-RUN npm run build
-
-# Stage 2: Production stage with nginx
+# Frontend Dockerfile - Minimal Chatbot-Only UI
+# Single stage - just nginx serving standalone HTML
 FROM nginx:alpine
 
-# Copy nginx configuration
+# Copy nginx configuration for chatbot-only setup
 RUN echo 'server { \
     listen 80; \
     server_name _; \
     root /usr/share/nginx/html; \
-    index index.html; \
+    index chatbot-only.html; \
+    client_max_body_size 50M; \
     \
     location / { \
-        try_files $uri $uri/ /index.html; \
+        try_files $uri $uri/ /chatbot-only.html; \
+        add_header Cache-Control "no-cache, must-revalidate"; \
     } \
     \
-    location /api { \
-        proxy_pass http://backend:8000; \
-        proxy_http_version 1.1; \
-        proxy_set_header Upgrade $http_upgrade; \
-        proxy_set_header Connection "upgrade"; \
-        proxy_set_header Host $host; \
-        proxy_set_header X-Real-IP $remote_addr; \
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for; \
-        proxy_set_header X-Forwarded-Proto $scheme; \
+    location = /health { \
+        access_log off; \
+        return 200 "healthy\n"; \
+        add_header Content-Type text/plain; \
     } \
 }' > /etc/nginx/conf.d/default.conf
 
-# Copy built application from builder stage
-COPY --from=builder /app/dist /usr/share/nginx/html
+# Copy the chatbot-only HTML file
+COPY chatbot-only.html /usr/share/nginx/html/
+
+# Optional: Copy assets if any
+COPY public/ /usr/share/nginx/html/ 2>/dev/null || true
 
 # Expose port
 EXPOSE 80

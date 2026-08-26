@@ -24,8 +24,6 @@ services:
       - ./backend/app:/app/app
       - ./backend/quotations:/app/quotations
       - ./backend/database:/app/database
-    depends_on:
-      - database
     networks:
       - crm-network
     restart: unless-stopped
@@ -36,9 +34,9 @@ services:
       retries: 3
       start_period: 40s
 
-  # Frontend Service - React Application
+  # Frontend Service - Chatbot-Only HTML
   frontend:
-    container_name: ironore-crm-frontend
+    container_name: ironore-crm-chatbot
     build:
       context: ./frontend
       dockerfile: Dockerfile
@@ -52,39 +50,12 @@ services:
       - crm-network
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/"]
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost/health"]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
 
-  # Database Service - SQL Server (optional, adjust as needed)
-  database:
-    container_name: ironore-crm-database
-    image: mcr.microsoft.com/mssql/server:2019-latest
-    environment:
-      - ACCEPT_EULA=Y
-      - SA_PASSWORD=${SA_PASSWORD}
-      - MSSQL_PID=Express
-    ports:
-      - "1433:1433"
-    volumes:
-      - mssql-data:/var/opt/mssql
-      - ./backend/database:/docker-entrypoint-initdb.d
-    networks:
-      - crm-network
-    restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "/opt/mssql-tools/bin/sqlcmd", "-S", "localhost", "-U", "SA", "-P", "${SA_PASSWORD}", "-Q", "SELECT 1"]
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-
 networks:
   crm-network:
     driver: bridge
-
-volumes:
-  mssql-data:
-    driver: local
