@@ -58,70 +58,130 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
       recognitionRef.current.lang = 'en-US'
 
       recognitionRef.current.onresult = (event) => {
-        let transcript = event.results[0][0].transcript
-        const field = selectedFieldRef.current
-        
-        console.log('[Speech Recognition] Transcript:', transcript, 'Target field:', field)
-        
-        // Convert word numbers to digits for quantity fields
-        if (field === 'quotationQuantity' || field === 'orderQuantity') {
-          // Try to convert common spoken numbers to digits
-          const wordToNum = {
-            'zero': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4', 
-            'five': '5', 'six': '6', 'seven': '7', 'eight': '8', 'nine': '9',
-            'ten': '10', 'twenty': '20', 'thirty': '30', 'forty': '40', 'fifty': '50',
-            'hundred': '00', 'thousand': '000'
+        try {
+          console.log('[Speech Recognition] onresult fired, event:', event)
+          console.log('[Speech Recognition] Results length:', event.results.length)
+          console.log('[Speech Recognition] Results:', event.results)
+          
+          // Safety check: make sure we have results
+          if (!event.results || event.results.length === 0) {
+            console.error('[Speech Recognition] No results captured')
+            setIsListening(false)
+            return
           }
           
-          const lowerTranscript = transcript.toLowerCase().trim()
-          // If it's a word number, try to convert
-          if (wordToNum[lowerTranscript]) {
-            transcript = wordToNum[lowerTranscript]
-            console.log('[Speech Recognition] Converted to number:', transcript)
+          // Get the last result (most recent speech)
+          const lastResultIndex = event.results.length - 1
+          const lastResult = event.results[lastResultIndex]
+          
+          if (!lastResult || lastResult.length === 0) {
+            console.error('[Speech Recognition] Last result is empty')
+            setIsListening(false)
+            return
           }
+          
+          let transcript = lastResult[0].transcript.trim()
+          const field = selectedFieldRef.current
+          const isFinal = lastResult.isFinal
+          
+          console.log('[Speech Recognition] Transcript:', transcript, 'Is Final:', isFinal, 'Target field:', field)
+          
+          // Only process final results
+          if (!isFinal) {
+            console.log('[Speech Recognition] Interim result, waiting for final...')
+            return
+          }
+          
+          // Convert word numbers to digits for quantity fields
+          if (field === 'quotationQuantity' || field === 'orderQuantity') {
+            // Try to convert common spoken numbers to digits
+            const wordToNum = {
+              'zero': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4', 
+              'five': '5', 'six': '6', 'seven': '7', 'eight': '8', 'nine': '9',
+              'ten': '10', 'twenty': '20', 'thirty': '30', 'forty': '40', 'fifty': '50',
+              'hundred': '00', 'thousand': '000'
+            }
+            
+            const lowerTranscript = transcript.toLowerCase().trim()
+            // If it's a word number, try to convert
+            if (wordToNum[lowerTranscript]) {
+              transcript = wordToNum[lowerTranscript]
+              console.log('[Speech Recognition] Converted to number:', transcript)
+            }
+          }
+          
+          // Route to the specific field only, don't put in input
+          if (field === 'quotationQuantity') {
+            console.log('[Speech Recognition] Updating quotationDetails.quantity to:', transcript)
+            setQuotationDetails(prev => ({ 
+              ...prev, 
+              quantity: transcript 
+            }))
+          } else if (field === 'orderQuantity') {
+            console.log('[Speech Recognition] Updating orderDetails.quantity to:', transcript)
+            setOrderDetails(prev => ({ 
+              ...prev, 
+              quantity: transcript 
+            }))
+          } else if (field === 'poNumber') {
+            setComplaintDetails(prev => ({ ...prev, poNumber: transcript }))
+          } else if (field === 'dispatchDate') {
+            setComplaintDetails(prev => ({ ...prev, dispatchDate: transcript }))
+          } else if (field === 'description') {
+            setComplaintDetails(prev => ({ ...prev, description: transcript }))
+          } else if (field === 'complaintIdInput') {
+            setComplaintDetails(prev => ({ ...prev, complaintIdInput: transcript }))
+          } else {
+            // Only put in input field for chat messages
+            console.log('[Speech Recognition] Updating input field (chat) to:', transcript)
+            setInput(transcript)
+          }
+          
+          setIsListening(false)
+          setSelectedField(null)
+          selectedFieldRef.current = null
+        } catch (err) {
+          console.error('[Speech Recognition] Error in onresult handler:', err)
+          setIsListening(false)
         }
-        
-        // Route to the specific field only, don't put in input
-        if (field === 'quotationQuantity') {
-          console.log('[Speech Recognition] Updating quotationDetails.quantity to:', transcript)
-          setQuotationDetails(prev => ({ 
-            ...prev, 
-            quantity: transcript 
-          }))
-        } else if (field === 'orderQuantity') {
-          console.log('[Speech Recognition] Updating orderDetails.quantity to:', transcript)
-          setOrderDetails(prev => ({ 
-            ...prev, 
-            quantity: transcript 
-          }))
-        } else if (field === 'poNumber') {
-          setComplaintDetails(prev => ({ ...prev, poNumber: transcript }))
-        } else if (field === 'dispatchDate') {
-          setComplaintDetails(prev => ({ ...prev, dispatchDate: transcript }))
-        } else if (field === 'description') {
-          setComplaintDetails(prev => ({ ...prev, description: transcript }))
-        } else if (field === 'complaintIdInput') {
-          setComplaintDetails(prev => ({ ...prev, complaintIdInput: transcript }))
-        } else {
-          // Only put in input field for chat messages
-          console.log('[Speech Recognition] Updating input field (chat) to:', transcript)
-          setInput(transcript)
-        }
-        
-        setIsListening(false)
-        setSelectedField(null)
-        selectedFieldRef.current = null
       }
 
       recognitionRef.current.onerror = (event) => {
-        console.error('Speech recognition error:', event.error)
+        console.error('[Speech Recognition] Error event:', event)
+        console.error('[Speech Recognition] Error:', event.error)
         setIsListening(false)
-        if (event.error === 'no-speech') {
-          setMessages((prev) => [...prev, { role: 'bot', text: "I didn't hear anything. Please try again.", isError: true }])
+        
+        let errorMessage = "Speech recognition error. Please try again."
+        
+        switch (event.error) {
+          case 'no-speech':
+            errorMessage = "I didn't hear anything. Please speak clearly and try again."
+            break
+          case 'audio-capture':
+            errorMessage = "No microphone found. Please check your microphone settings."
+            break
+          case 'network':
+            errorMessage = "Network error. Please check your internet connection."
+            break
+          case 'permission-denied':
+            errorMessage = "Microphone permission denied. Please allow access to your microphone in browser settings."
+            break
+          case 'not-allowed':
+            errorMessage = "Speech recognition not allowed. Please check your browser permissions."
+            break
+          default:
+            errorMessage = `Speech recognition error: ${event.error}`
         }
+        
+        setMessages((prev) => [...prev, { role: 'bot', text: errorMessage, isError: true }])
       }
 
+      recognitionRef.current.onstart = () => {
+        console.log('[Speech Recognition] Started listening...')
+      }
+      
       recognitionRef.current.onend = () => {
+        console.log('[Speech Recognition] Stopped listening')
         setIsListening(false)
       }
     }
