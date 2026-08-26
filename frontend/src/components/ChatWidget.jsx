@@ -48,147 +48,150 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
     }
   }, [open, pendingAction])
 
+  // Initialize Speech Recognition on mount
   useEffect(() => {
-    // Initialize Speech Recognition
-    if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-      recognitionRef.current = new SpeechRecognition()
-      recognitionRef.current.continuous = false
-      recognitionRef.current.interimResults = false
-      recognitionRef.current.lang = 'en-US'
-
-      recognitionRef.current.onresult = (event) => {
-        try {
-          console.log('[Speech Recognition] onresult fired, event:', event)
-          console.log('[Speech Recognition] Results length:', event.results.length)
-          console.log('[Speech Recognition] Results:', event.results)
+    console.log('[Speech Init] Initializing speech recognition...')
+    
+    // Check for browser support
+    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
+    
+    if (!SpeechRecognition) {
+      console.error('[Speech Init] Speech Recognition not supported in this browser')
+      return
+    }
+    
+    try {
+      const recognition = new SpeechRecognition()
+      console.log('[Speech Init] Recognition object created')
+      
+      // Configuration
+      recognition.continuous = false
+      recognition.interimResults = false
+      recognition.lang = 'en-US'
+      recognition.maxAlternatives = 1
+      
+      // Store in ref
+      recognitionRef.current = recognition
+      
+      // ONSTART - fires when recognition starts
+      recognition.onstart = function() {
+        console.log('[Speech] onstart - Listening started')
+        setIsListening(true)
+      }
+      
+      // ONRESULT - fires when result is available
+      recognition.onresult = function(event) {
+        console.log('[Speech] onresult fired')
+        console.log('[Speech] event:', event)
+        console.log('[Speech] results:', event.results)
+        console.log('[Speech] results.length:', event.results.length)
+        
+        if (!event.results || event.results.length === 0) {
+          console.error('[Speech] No results')
+          return
+        }
+        
+        // Collect final transcript
+        let finalTranscript = ''
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+          const transcript = event.results[i][0].transcript
+          const isFinal = event.results[i].isFinal
+          const confidence = event.results[i][0].confidence
           
-          // Safety check: make sure we have results
-          if (!event.results || event.results.length === 0) {
-            console.error('[Speech Recognition] No results captured')
-            setIsListening(false)
-            return
+          console.log(`[Speech] Result[${i}]: "${transcript}" | Final: ${isFinal} | Confidence: ${confidence}`)
+          
+          if (isFinal) {
+            finalTranscript += transcript + ' '
           }
-          
-          // Get the last result (most recent speech)
-          const lastResultIndex = event.results.length - 1
-          const lastResult = event.results[lastResultIndex]
-          
-          if (!lastResult || lastResult.length === 0) {
-            console.error('[Speech Recognition] Last result is empty')
-            setIsListening(false)
-            return
-          }
-          
-          let transcript = lastResult[0].transcript.trim()
+        }
+        
+        finalTranscript = finalTranscript.trim()
+        console.log('[Speech] Final transcript:', finalTranscript)
+        
+        if (finalTranscript) {
           const field = selectedFieldRef.current
-          const isFinal = lastResult.isFinal
+          console.log('[Speech] Target field:', field)
           
-          console.log('[Speech Recognition] Transcript:', transcript, 'Is Final:', isFinal, 'Target field:', field)
-          
-          // Only process final results
-          if (!isFinal) {
-            console.log('[Speech Recognition] Interim result, waiting for final...')
-            return
-          }
-          
-          // Convert word numbers to digits for quantity fields
+          // Convert word numbers if quantity field
+          let text = finalTranscript
           if (field === 'quotationQuantity' || field === 'orderQuantity') {
-            // Try to convert common spoken numbers to digits
             const wordToNum = {
-              'zero': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4', 
+              'zero': '0', 'one': '1', 'two': '2', 'three': '3', 'four': '4',
               'five': '5', 'six': '6', 'seven': '7', 'eight': '8', 'nine': '9',
               'ten': '10', 'twenty': '20', 'thirty': '30', 'forty': '40', 'fifty': '50',
               'hundred': '00', 'thousand': '000'
             }
-            
-            const lowerTranscript = transcript.toLowerCase().trim()
-            // If it's a word number, try to convert
-            if (wordToNum[lowerTranscript]) {
-              transcript = wordToNum[lowerTranscript]
-              console.log('[Speech Recognition] Converted to number:', transcript)
+            const lower = finalTranscript.toLowerCase().trim()
+            if (wordToNum[lower]) {
+              text = wordToNum[lower]
+              console.log('[Speech] Converted to number:', text)
             }
           }
           
-          // Route to the specific field only, don't put in input
+          // Update appropriate state
           if (field === 'quotationQuantity') {
-            console.log('[Speech Recognition] Updating quotationDetails.quantity to:', transcript)
-            setQuotationDetails(prev => ({ 
-              ...prev, 
-              quantity: transcript 
-            }))
+            console.log('[Speech] Updating quotation quantity:', text)
+            setQuotationDetails(prev => ({ ...prev, quantity: text }))
           } else if (field === 'orderQuantity') {
-            console.log('[Speech Recognition] Updating orderDetails.quantity to:', transcript)
-            setOrderDetails(prev => ({ 
-              ...prev, 
-              quantity: transcript 
-            }))
+            console.log('[Speech] Updating order quantity:', text)
+            setOrderDetails(prev => ({ ...prev, quantity: text }))
           } else if (field === 'poNumber') {
-            setComplaintDetails(prev => ({ ...prev, poNumber: transcript }))
+            setComplaintDetails(prev => ({ ...prev, poNumber: text }))
           } else if (field === 'dispatchDate') {
-            setComplaintDetails(prev => ({ ...prev, dispatchDate: transcript }))
+            setComplaintDetails(prev => ({ ...prev, dispatchDate: text }))
           } else if (field === 'description') {
-            setComplaintDetails(prev => ({ ...prev, description: transcript }))
+            setComplaintDetails(prev => ({ ...prev, description: text }))
           } else if (field === 'complaintIdInput') {
-            setComplaintDetails(prev => ({ ...prev, complaintIdInput: transcript }))
+            setComplaintDetails(prev => ({ ...prev, complaintIdInput: text }))
           } else {
-            // Only put in input field for chat messages
-            console.log('[Speech Recognition] Updating input field (chat) to:', transcript)
-            setInput(transcript)
+            console.log('[Speech] Updating chat input:', text)
+            setInput(text)
           }
-          
-          setIsListening(false)
-          setSelectedField(null)
-          selectedFieldRef.current = null
-        } catch (err) {
-          console.error('[Speech Recognition] Error in onresult handler:', err)
-          setIsListening(false)
         }
-      }
-
-      recognitionRef.current.onerror = (event) => {
-        console.error('[Speech Recognition] Error event:', event)
-        console.error('[Speech Recognition] Error:', event.error)
-        setIsListening(false)
-        
-        let errorMessage = "Speech recognition error. Please try again."
-        
-        switch (event.error) {
-          case 'no-speech':
-            errorMessage = "I didn't hear anything. Please speak clearly and try again."
-            break
-          case 'audio-capture':
-            errorMessage = "No microphone found. Please check your microphone settings."
-            break
-          case 'network':
-            errorMessage = "Network error. Please check your internet connection."
-            break
-          case 'permission-denied':
-            errorMessage = "Microphone permission denied. Please allow access to your microphone in browser settings."
-            break
-          case 'not-allowed':
-            errorMessage = "Speech recognition not allowed. Please check your browser permissions."
-            break
-          default:
-            errorMessage = `Speech recognition error: ${event.error}`
-        }
-        
-        setMessages((prev) => [...prev, { role: 'bot', text: errorMessage, isError: true }])
-      }
-
-      recognitionRef.current.onstart = () => {
-        console.log('[Speech Recognition] Started listening...')
       }
       
-      recognitionRef.current.onend = () => {
-        console.log('[Speech Recognition] Stopped listening')
+      // ONERROR - fires on error
+      recognition.onerror = function(event) {
+        console.error('[Speech] onerror fired')
+        console.error('[Speech] error:', event.error)
+        
+        const errors = {
+          'no-speech': "I didn't hear you. Please speak clearly and try again.",
+          'audio-capture': 'No microphone detected. Please check your microphone.',
+          'network': 'Network error. Please check your internet connection.',
+          'permission-denied': 'Microphone access denied. Please allow microphone in browser settings.',
+          'not-allowed': 'Microphone not allowed. Please check browser permissions.'
+        }
+        
+        const message = errors[event.error] || `Speech recognition error: ${event.error}`
+        setMessages(prev => [...prev, { role: 'bot', text: message, isError: true }])
+      }
+      
+      // ONEND - fires when recognition ends
+      recognition.onend = function() {
+        console.log('[Speech] onend - Listening stopped')
         setIsListening(false)
       }
+      
+      // ONABORT - fires when recognition is aborted
+      recognition.onabort = function() {
+        console.log('[Speech] onabort - Recognition aborted')
+        setIsListening(false)
+      }
+      
+      console.log('[Speech Init] All handlers registered')
+      
+    } catch (error) {
+      console.error('[Speech Init] Error creating recognition:', error)
     }
-
+    
     return () => {
       if (recognitionRef.current) {
-        recognitionRef.current.stop()
+        try {
+          recognitionRef.current.abort()
+        } catch (e) {
+          console.error('[Speech] Error aborting:', e)
+        }
       }
     }
   }, [])
@@ -238,7 +241,6 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
 
   function handleCategorySelect(category) {
     setSelectedComplaintCategory(category)
-    // Update the last bot message to show the form instead of categories
     setMessages((prev) => {
       const newMessages = [...prev]
       const lastBotMsgIndex = newMessages.map((m, i) => m.role === 'bot' ? i : -1).filter(i => i !== -1).pop()
@@ -256,7 +258,6 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
 
   function handleSelectProduct(product) {
     setOrderDetails({ selectedProduct: product, quantity: '', availableQuantity: null })
-    // Update the last bot message to show order form
     setMessages((prev) => {
       const newMessages = [...prev]
       const lastBotMsgIndex = newMessages.map((m, i) => m.role === 'bot' ? i : -1).filter(i => i !== -1).pop()
@@ -274,7 +275,6 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
 
   function handleSelectQuotationProduct(product) {
     setQuotationDetails({ selectedProduct: product, quantity: '', showForm: true })
-    // Update the last bot message to show quotation form
     setMessages((prev) => {
       const newMessages = [...prev]
       const lastBotMsgIndex = newMessages.map((m, i) => m.role === 'bot' ? i : -1).filter(i => i !== -1).pop()
@@ -295,7 +295,6 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
     
     setLoading(true)
     try {
-      // Send order with product PID and quantity to backend for validation
       const res = await api.chat(
         `Order: Product ${orderDetails.selectedProduct.PID}, Quantity: ${orderDetails.quantity} MT`,
         `order_quantity:${orderDetails.selectedProduct.PID}:${orderDetails.quantity}`
@@ -321,7 +320,6 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
     
     setLoading(true)
     try {
-      // Send quotation request with product PID and quantity
       const res = await api.chat(
         `Quotation: Product ${quotationDetails.selectedProduct.pid}, Quantity: ${quotationDetails.quantity} MT`,
         `submit_quantity_quotation:${quotationDetails.selectedProduct.pid}:${quotationDetails.quantity}`
@@ -333,7 +331,6 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
         showQuotationForm: false
       }])
       
-      // Reset quotation details after submission
       setQuotationDetails({ selectedProduct: null, quantity: '', showForm: false })
     } catch (err) {
       const msg = err instanceof ApiError
@@ -345,14 +342,11 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
     }
   }
 
-  // Function to handle previous complaints options (track or new)
-
   function runAction(actionLabel) {
     sendMessage(actionLabel, actionLabel)
   }
 
   function handleSend() {
-    // If we're listening to a field, don't send to chat
     if (selectedField) {
       return
     }
@@ -377,7 +371,12 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
   }
 
   function toggleListening() {
+    console.log('[toggleListening] Called')
+    console.log('[toggleListening] recognitionRef.current:', recognitionRef.current)
+    console.log('[toggleListening] isListening:', isListening)
+    
     if (!recognitionRef.current) {
+      console.error('[toggleListening] No recognition object')
       setMessages((prev) => [...prev, { 
         role: 'bot', 
         text: "Speech recognition is not supported in your browser. Please use Chrome, Edge, or Safari.", 
@@ -387,30 +386,31 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
     }
 
     if (isListening) {
+      console.log('[toggleListening] Stopping recognition')
       recognitionRef.current.stop()
-      setIsListening(false)
     } else {
-      // For quotation form - set field to capture quantity
+      // Determine which field
       if (quotationDetails.showForm && quotationDetails.selectedProduct) {
-        console.log('[toggleListening] Setting quotationQuantity field')
-        setSelectedField('quotationQuantity')
+        console.log('[toggleListening] Set field: quotationQuantity')
         selectedFieldRef.current = 'quotationQuantity'
-      } 
-      // For order form - set field to capture quantity
-      else if (orderDetails.selectedProduct) {
-        console.log('[toggleListening] Setting orderQuantity field')
-        setSelectedField('orderQuantity')
+        setSelectedField('quotationQuantity')
+      } else if (orderDetails.selectedProduct) {
+        console.log('[toggleListening] Set field: orderQuantity')
         selectedFieldRef.current = 'orderQuantity'
-      } 
-      // Default to chat input
-      else {
-        console.log('[toggleListening] No form active, defaulting to chat input')
-        setSelectedField(null)
+        setSelectedField('orderQuantity')
+      } else {
+        console.log('[toggleListening] Set field: null (chat input)')
         selectedFieldRef.current = null
+        setSelectedField(null)
       }
-      console.log('[toggleListening] selectedFieldRef.current =', selectedFieldRef.current)
-      recognitionRef.current.start()
-      setIsListening(true)
+      
+      console.log('[toggleListening] Starting recognition, field:', selectedFieldRef.current)
+      try {
+        recognitionRef.current.start()
+        console.log('[toggleListening] Recognition started successfully')
+      } catch (err) {
+        console.error('[toggleListening] Error starting recognition:', err)
+      }
     }
   }
 
@@ -450,7 +450,6 @@ export default function ChatWidget({ user, open, onToggle, pendingAction, onCons
     const complaintId = complaintDetails.complaintIdInput?.trim()
     if (complaintId) {
       setLoading(true)
-      // Send the complaint ID for tracking
       setMessages((prev) => [...prev, { role: 'user', text: `Check complaint ${complaintId}` }])
       setInput('')
       try {
