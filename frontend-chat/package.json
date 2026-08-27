@@ -1,0 +1,36 @@
+{
+  "name": "chat-floating-button",
+  "version": "1.0.0",
+  "description": "Standalone chat floating button component for React applications. Includes speech recognition, order placement, quotations, and more.",
+  "author": "IronOre CRM Team",
+  "license": "MIT",
+  "main": "ChatFloatingButton.jsx",
+  "peerDependencies": {
+    "react": "^16.8.0 || ^17.0.0 || ^18.0.0",
+    "react-dom": "^16.8.0 || ^17.0.0 || ^18.0.0"
+  },
+  "dependencies": {
+    "react-markdown": "^8.0.0 || ^9.0.0"
+  },
+  "devDependencies": {
+    "react": "^18.0.0",
+    "react-dom": "^18.0.0"
+  },
+  "keywords": [
+    "react",
+    "chat",
+    "floating-button",
+    "widget",
+    "speech-recognition",
+    "orders",
+    "quotations",
+    "crm"
+  ],
+  "files": [
+    "ChatFloatingButton.jsx",
+    "ChatMessage.jsx",
+    "chat-button.css",
+    "README.md",
+    "package.json"
+  ]
+}
