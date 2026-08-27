@@ -60,30 +60,45 @@ uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 Backend API will be available at: **http://localhost:8000**
 Swagger UI Docs: **http://localhost:8000/docs**
 
-### 2. Frontend - Chat Widget Setup
+### 2. Frontend - Chat Widget (Component Library)
 
-The chat widget is a standalone component in `frontend-chat/`.
+The chat widget in `frontend-chat/` is a **standalone React component** meant for integration into other projects. It's not a standalone app with dev server.
 
-#### 2a. Install Dependencies
+#### Integration Options:
+
+**Option A: Use the Dashboard (Easiest)**
+
+The dashboard already includes the chat widget. Use the dashboard instead:
 
 ```bash
-cd frontend-chat
+cd frontend
 npm install
-```
-
-#### 2b. Start Dev Server
-
-```bash
 npm run dev
 ```
 
-Or for production build:
-
-```bash
-npm run build
-```
-
 Chat widget will be available at: **http://localhost:5173**
+
+**Option B: Integration in Your Own React App**
+
+Copy the component files to your project:
+- `frontend-chat/ChatFloatingButton.jsx`
+- `frontend-chat/ChatMessage.jsx`
+- `frontend-chat/chat-button.css`
+
+Then import in your app:
+```jsx
+import ChatFloatingButton from './ChatFloatingButton'
+import './chat-button.css'
+
+export default function App() {
+  return (
+    <>
+      <YourContent />
+      <ChatFloatingButton apiBaseUrl="http://localhost:8000" />
+    </>
+  )
+}
+```
 
 ### 3. Frontend - Dashboard Setup (Optional)
 
@@ -120,7 +135,7 @@ Dashboard will be available at: **http://localhost:5173**
 
 ## Full Setup (All Services)
 
-Run all three services simultaneously:
+Run the essential services (backend + dashboard):
 
 ### Terminal 1 - Backend
 
@@ -129,19 +144,14 @@ cd backend
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-### Terminal 2 - Chat Frontend
-
-```bash
-cd frontend-chat
-npm run dev
-```
-
-### Terminal 3 - Dashboard (Optional)
+### Terminal 2 - Dashboard with Chat Widget
 
 ```bash
 cd frontend
 npm run dev
 ```
+
+The dashboard includes the chat widget integrated!
 
 ---
 
@@ -151,8 +161,8 @@ npm run dev
 |---------|-----|---------|
 | Backend API | http://localhost:8000 | REST API server |
 | API Docs | http://localhost:8000/docs | Swagger UI documentation |
-| Chat Widget | http://localhost:5173 | Standalone chat component |
-| Dashboard | http://localhost:5173 | Full admin dashboard |
+| Dashboard | http://localhost:5173 | Full admin dashboard + chat widget |
+| Database | localhost:1433 | MSSQL Server |
 
 ---
 
@@ -289,6 +299,19 @@ pip install -r requirements.txt --upgrade
 # Test connection manually:
 python -c "from app.database import engine; print(engine.connect())"
 ```
+
+### frontend-chat says "Missing script: dev"
+
+This is **expected behavior**. The `frontend-chat/` folder is a **component library**, not a standalone app.
+
+**Solution:** Use the dashboard instead:
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+The dashboard already includes the chat widget integrated. See **Option A** in setup step 2.
 
 ### Frontend won't start
 
