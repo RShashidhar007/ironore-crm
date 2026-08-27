@@ -1,11 +1,11 @@
 import { useState, useEffect } from 'react'
-import Login from './pages/Login.jsx'
-import Dashboard from './pages/Dashboard.jsx'
-import { getToken, getUser, clearSession } from './api.js'
+import ChatWidget from './components/ChatWidget.jsx'
+import { getToken, getUser } from './api.js'
 
 export default function App() {
   const [session, setSession] = useState(null)
   const [checked, setChecked] = useState(false)
+  const [chatOpen, setChatOpen] = useState(false)
 
   useEffect(() => {
     const token = getToken()
@@ -14,18 +14,17 @@ export default function App() {
     setChecked(true)
   }, [])
 
-  function handleLogin(user) {
-    setSession({ token: getToken(), user })
-  }
-
-  function handleLogout() {
-    clearSession()
-    setSession(null)
-  }
-
   if (!checked) return null
 
-  return session
-    ? <Dashboard user={session.user} onLogout={handleLogout} />
-    : <Login onLogin={handleLogin} />
+  return (
+    <div style={{ minHeight: '100vh', background: '#14181c' }}>
+      {session && (
+        <ChatWidget
+          user={session.user}
+          open={chatOpen}
+          onToggle={() => setChatOpen((v) => !v)}
+        />
+      )}
+    </div>
+  )
 }
