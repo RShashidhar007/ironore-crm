@@ -1,27 +1,72 @@
 ================================================================================
-SETUP CHECKLIST FOR AUTOMATIC SOLUTION GENERATION
+IRON ORE CRM - DATABASE SETUP CHECKLIST
 ================================================================================
 
-REQUIREMENT 1: Database Trigger
-Status: NOT INSTALLED (This is why solutions aren't updating)
+DATABASE FILES IN FOLDER:
+✅ create_quotations_table.sql - Quotations_Master table creation
+✅ seed_inventory_data.sql - Sample inventory data
+✅ query_inventory_master.sql - Query inventory records
+✅ query_complaints_master.sql - Query complaints records
+✅ INSTALL_CHECKLIST.txt - This checklist
+
+================================================================================
+SETUP REQUIREMENTS
+================================================================================
+
+REQUIREMENT 1: Database Connection
+Status: VERIFY REQUIRED
+
+ACTION NEEDED:
+1. Ensure MSSQL Server is running
+2. Verify connection string in backend/.env:
+   DATABASE_URL=mssql+pyodbc://[user]:[password]@[server]/Customer_DB?driver=ODBC+Driver+17+for+SQL+Server
+
+VERIFY:
+Run in backend terminal:
+  python app/database.py
+  
+Should see: Database connection successful
+
+================================================================================
+
+REQUIREMENT 2: Create Quotations Table
+Status: EXECUTE REQUIRED
 
 ACTION NEEDED:
 1. Open SQL Server Management Studio (SSMS)
 2. Click: File → Open → File
-3. Select: backend\database\instant_solution_trigger.sql
+3. Select: backend/database/create_quotations_table.sql
 4. Click: Execute (or press F5)
-5. Wait for completion (you'll see success messages)
+5. Wait for completion
 
 VERIFY:
 Run this query in SSMS:
-  SELECT name FROM sys.triggers WHERE name LIKE '%Solution%';
+  SELECT * FROM [dbo].[Quotations_Master];
   
-Should return: TR_Complaints_TriggerSolutionGeneration
+Should show: Table created (0 rows initially)
 
 ================================================================================
 
-REQUIREMENT 2: Backend Server Running
-Status: LIKELY RUNNING (but verify)
+REQUIREMENT 3: Seed Inventory Data
+Status: EXECUTE REQUIRED
+
+ACTION NEEDED:
+1. Open SQL Server Management Studio (SSMS)
+2. Click: File → Open → File
+3. Select: backend/database/seed_inventory_data.sql
+4. Click: Execute (or press F5)
+5. Wait for completion
+
+VERIFY:
+Run this query in SSMS:
+  SELECT TOP 10 * FROM [dbo].[Inventory_Master] ORDER BY InventoryID DESC;
+  
+Should show: Sample inventory records with Produced/Sold categories
+
+================================================================================
+
+REQUIREMENT 4: Backend Server Running
+Status: VERIFY REQUIRED
 
 ACTION NEEDED:
 Open terminal and run:
@@ -34,8 +79,8 @@ Should see:
 
 ================================================================================
 
-REQUIREMENT 3: Ollama Service Running
-Status: NEED TO VERIFY
+REQUIREMENT 5: Ollama Service Running (For AI Features)
+Status: VERIFY REQUIRED (Optional for basic functionality)
 
 ACTION NEEDED:
 Make sure Ollama is running on your system
@@ -47,40 +92,125 @@ If not running:
 
 ================================================================================
 
-AFTER SETUP:
+EXECUTION ORDER FOR NEW SETUP:
+================================================================================
 
-Test the system:
+Step 1: Execute create_quotations_table.sql
+  - Creates Quotations_Master table with indexes
 
-1. Edit complaint in MSSQL:
-   - Right-click Complaints_Master → Edit Top 200 Rows
-   - Edit the review columns
-   - Click Update (Ctrl+Enter)
+Step 2: Execute seed_inventory_data.sql
+  - Populates Inventory_Master with sample data
+  - Creates 5 products with Produced/Sold entries
 
-2. Check trigger fired:
-   SELECT TOP 5 * FROM SolutionGenerationLog ORDER BY CreatedAt DESC;
+Step 3: Start Backend Server
+  - Run: python -m uvicorn app.main:app --reload
+  - Should see: Application startup complete
 
-3. Wait 30 seconds for scheduler
+Step 4: Test Frontend
+  - Open: http://localhost:5173 (Vite dev server)
+  - Should see: Chat button (Fe) in bottom-right
+  - Try chat action: "Ask for a Quotation"
 
-4. Check solution updated:
-   SELECT ComplaintID, Solution, UpdatedDate 
-   FROM Complaints_Master 
-   WHERE ComplaintID = 'YOUR_COMPLAINT_ID'
-   ORDER BY UpdatedDate DESC;
+Step 5: Test Quotation Flow
+  - Select product from available list
+  - Enter quantity (must be ≤ Available Stock MT)
+  - Generate quotation
+  - Verify: Record in Quotations_Master table
 
 ================================================================================
 
-IF SOLUTION STILL NOT UPDATING:
+VERIFICATION QUERIES:
+================================================================================
 
-1. Run diagnostic:
-   python scripts/diagnose_solution_update.py
+Check all Products:
+  SELECT PID, ProductName, ProductCategory, PStatus 
+  FROM [dbo].[Product_Master]
+  ORDER BY PID;
 
-2. Check logs:
-   SELECT * FROM SolutionGenerationLog ORDER BY CreatedAt DESC;
+Check Inventory Status:
+  SELECT 
+    im.PID,
+    pm.ProductName,
+    SUM(CASE WHEN im.Category = 'Produced' THEN im.QuantityMT ELSE 0 END) as TotalProduced,
+    SUM(CASE WHEN im.Category = 'Sold' THEN im.QuantityMT ELSE 0 END) as TotalSold,
+    SUM(CASE WHEN im.Category = 'Produced' THEN im.QuantityMT ELSE -im.QuantityMT END) as Available
+  FROM [dbo].[Inventory_Master] im
+  LEFT JOIN [dbo].[Product_Master] pm ON im.PID = pm.PID
+  GROUP BY im.PID, pm.ProductName;
 
-3. Monitor in real-time:
-   python scripts/monitor_solutions.py
+Check Quotations Generated:
+  SELECT TOP 20 QuotationNumber, ProductName, QuantityMT, PricePerMT, Status, CreatedDate
+  FROM [dbo].[Quotations_Master]
+  ORDER BY CreatedDate DESC;
 
-4. Manual trigger:
-   python scripts/manual_trigger_solution.py
+Check Complaints:
+  SELECT TOP 20 ComplaintID, CategoryType, Status, CreatedDate
+  FROM [dbo].[Complaints_Master]
+  ORDER BY CreatedDate DESC;
+
+================================================================================
+
+TROUBLESHOOTING:
+================================================================================
+
+Issue: Database connection fails
+Solution:
+  1. Check SQL Server is running
+  2. Verify credentials in backend/.env
+  3. Test connection: sqlcmd -S [server] -U [user] -P [password]
+
+Issue: Quotation generation fails
+Solution:
+  1. Verify create_quotations_table.sql was executed
+  2. Check backend logs for errors
+  3. Verify MSSQL connection string
+
+Issue: Inventory shows 0 available
+Solution:
+  1. Execute seed_inventory_data.sql
+  2. Query: SELECT * FROM Inventory_Master;
+  3. Verify Produced > Sold for products
+
+Issue: Ollama connection error
+Solution:
+  1. Start Ollama: ollama serve
+  2. Pull model: ollama pull llama2
+  3. Verify: curl http://localhost:11434/api/tags
+
+================================================================================
+
+NOTES:
+================================================================================
+
+1. Database tables required:
+   - Login_Master (authentication)
+   - Customer_Detail (customer info)
+   - Product_Master (product catalog)
+   - Product_Category_Master (product types)
+   - Inventory_Master (stock tracking) - POPULATED BY seed_inventory_data.sql
+   - Complaints_Master (complaint tracking)
+   - Quotations_Master - CREATED BY create_quotations_table.sql
+
+2. Pricing model:
+   - InitialPrice: Base cost per MT
+   - SellingPrice: Sales price per MT
+   - Available = Produced - Sold (in MT)
+
+3. Available Stock Calculation:
+   - Products with Produced - Sold > 0 are available for quotation
+   - Orders/Quotations are generated against available inventory
+
+4. Frontend features:
+   - Chat button always visible (bottom-right)
+   - Quick actions: Quotation, Order, Product Info, Complaint, Contact
+   - Voice input (Chrome/Edge/Safari)
+   - Real-time LLM responses
+
+================================================================================
+
+Document Version: 1.0
+Last Updated: August 27, 2026
+Status: Database setup ready for execution
+Owner: Database/Backend Team
 
 ================================================================================
