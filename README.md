@@ -107,7 +107,7 @@ ironore-crm/
 
 ### 1. Clone the Repository
 ```bash
-git clone https://github.com/yourusername/ironore-crm.git
+git clone https://github.com/RShashidhar007/ironore-crm.git
 cd ironore-crm
 ```
 
