@@ -18,13 +18,11 @@ export default function App() {
 
   return (
     <div style={{ minHeight: '100vh', background: '#14181c' }}>
-      {session && (
-        <ChatWidget
-          user={session.user}
-          open={chatOpen}
-          onToggle={() => setChatOpen((v) => !v)}
-        />
-      )}
+      <ChatWidget
+        user={session?.user}
+        open={chatOpen}
+        onToggle={() => setChatOpen((v) => !v)}
+      />
     </div>
   )
 }
